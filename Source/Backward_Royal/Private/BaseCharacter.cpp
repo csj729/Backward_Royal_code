@@ -2,76 +2,114 @@
 #include "BaseCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "BaseWeapon.h" // [중요] BaseWeapon 기능을 사용하기 위해 Include
 
-// 로그 카테고리 정의
 DEFINE_LOG_CATEGORY(LogBaseChar);
 
 ABaseCharacter::ABaseCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // 1. 메쉬 컴포넌트 초기화
-    // GetMesh()는 ACharacter가 이미 가지고 있습니다. 이를 Root(Body)로 씁니다.
-
-    // 머리
+    // 아머 메쉬 초기화
     HeadMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeadMesh"));
-    HeadMesh->SetupAttachment(GetMesh()); // 몸체에 붙임
-    HeadMesh->SetCollisionProfileName(TEXT("NoCollision")); // 충돌은 캡슐이 담당
+    HeadMesh->SetupAttachment(GetMesh());
+    HeadMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 상체
     ChestMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("ChestMesh"));
     ChestMesh->SetupAttachment(GetMesh());
     ChestMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 장갑
     HandMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HandMesh"));
     HandMesh->SetupAttachment(GetMesh());
     HandMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 하의
     LegMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("LegMesh"));
     LegMesh->SetupAttachment(GetMesh());
     LegMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 신발
     FootMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FootMesh"));
     FootMesh->SetupAttachment(GetMesh());
     FootMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    // 2. 기본값 설정
-    bEnableArmorStats = false; // 기본적으로 무게 시스템 활성화
+    bEnableArmorStats = false;
     DefaultWalkSpeed = 600.0f;
     CurrentTotalWeight = 0.0f;
+    CurrentWeapon = nullptr; // 무기 초기화
 }
 
 void ABaseCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // 3. Leader Pose Component 설정 (매우 중요)
-    // 모든 파츠가 Body(GetMesh)의 애니메이션을 따라하도록 설정합니다.
-    // UE5에서는 SetLeaderPoseComponent, 구버전은 SetMasterPoseComponent
-
+    // Leader Pose 설정
     HeadMesh->SetLeaderPoseComponent(GetMesh());
     ChestMesh->SetLeaderPoseComponent(GetMesh());
     HandMesh->SetLeaderPoseComponent(GetMesh());
     LegMesh->SetLeaderPoseComponent(GetMesh());
     FootMesh->SetLeaderPoseComponent(GetMesh());
 
-    // 초기 이동 속도 저장
     if (GetCharacterMovement())
     {
         DefaultWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
     }
+}
 
-    CHAR_LOG(Display, TEXT("Character Ready. Stats Mode: %d"), bEnableArmorStats);
+// [신규] 무기 장착 구현
+void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
+{
+    if (!NewWeapon) return;
+
+    // 기존 무기 버리기 (교체)
+    if (CurrentWeapon)
+    {
+        DropCurrentWeapon();
+    }
+
+    CurrentWeapon = NewWeapon;
+
+    // 1. 소유권 설정 (AI나 플레이어가 데미지를 입혔을 때 판정용)
+    CurrentWeapon->SetOwner(this);
+
+    // 2. 무기 상태 변경 (물리 끄기, 충돌 끄기 등)
+    CurrentWeapon->OnEquipped();
+
+    // 3. 소켓 부착
+    FName SocketName = TEXT("WeaponSocket");
+
+    // 장갑(HandMesh)이 있다면 거기에, 없으면 몸통(GetMesh)에 부착
+    USkeletalMeshComponent* AttachTarget = HandMesh ? HandMesh : GetMesh();
+
+    if (AttachTarget->DoesSocketExist(SocketName))
+    {
+        CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
+    }
+    else
+    {
+        // 소켓 없으면 임시로 오른손 뼈에 부착
+        CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
+        CHAR_LOG(Warning, TEXT("Socket 'WeaponSocket' not found. Attached to 'hand_r' instead."));
+    }
+
+    CHAR_LOG(Log, TEXT("Equipped Weapon: %s"), *NewWeapon->GetName());
+}
+
+// [신규] 무기 버리기 구현
+void ABaseCharacter::DropCurrentWeapon()
+{
+    if (!CurrentWeapon) return;
+
+    CHAR_LOG(Log, TEXT("Dropping Weapon: %s"), *CurrentWeapon->GetName());
+
+    // 무기에게 드랍 신호 (물리 켜기, 분리)
+    CurrentWeapon->OnDropped();
+
+    // 참조 해제
+    CurrentWeapon = nullptr;
 }
 
 void ABaseCharacter::EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor)
 {
     USkeletalMeshComponent* TargetMesh = nullptr;
-
-    // 슬롯에 맞는 메쉬 컴포넌트 선택
     switch (Slot)
     {
     case EArmorSlot::Head:  TargetMesh = HeadMesh; break;
@@ -79,34 +117,17 @@ void ABaseCharacter::EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor)
     case EArmorSlot::Hands: TargetMesh = HandMesh; break;
     case EArmorSlot::Legs:  TargetMesh = LegMesh; break;
     case EArmorSlot::Feet:  TargetMesh = FootMesh; break;
-    default:
-        CHAR_LOG(Warning, TEXT("Invalid Armor Slot requested"));
-        return;
+    default: return;
     }
 
     if (TargetMesh)
     {
-        // 1. 메쉬 교체
-        // NewArmor.ArmorMesh가 nullptr이면 장비 해제(맨몸)로 간주 가능
         TargetMesh->SetSkeletalMesh(NewArmor.ArmorMesh);
-
-        CHAR_LOG(Log, TEXT("Equipped Armor on Slot [%d] : %s"), (uint8)Slot, *NewArmor.RowName.ToString());
-
-        // 2. 무게 계산 로직
         if (bEnableArmorStats)
         {
-            // 기존에 해당 슬롯에 있던 무게 제거
-            if (EquippedArmorWeights.Contains(Slot))
-            {
-                CurrentTotalWeight -= EquippedArmorWeights[Slot];
-            }
-
-            // 새 무게 추가
-            float NewWeight = NewArmor.WeightKg;
-            EquippedArmorWeights.Add(Slot, NewWeight);
-            CurrentTotalWeight += NewWeight;
-
-            // 속도 업데이트
+            if (EquippedArmorWeights.Contains(Slot)) CurrentTotalWeight -= EquippedArmorWeights[Slot];
+            EquippedArmorWeights.Add(Slot, NewArmor.WeightKg);
+            CurrentTotalWeight += NewArmor.WeightKg;
             UpdateMovementSpeedBasedOnWeight();
         }
     }
@@ -115,25 +136,10 @@ void ABaseCharacter::EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor)
 void ABaseCharacter::UpdateMovementSpeedBasedOnWeight()
 {
     if (!GetCharacterMovement()) return;
+    if (!bEnableArmorStats) { GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed; return; }
 
-    if (!bEnableArmorStats)
-    {
-        // 스탯 모드가 꺼져있으면 기본 속도 유지
-        GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed;
-        return;
-    }
-
-    // [공식 제안] 속도 패널티 = 무게 * 계수
-    // 예: 1kg당 이동속도 5 감소
     float WeightPenalty = CurrentTotalWeight * 5.0f;
-
-    // 최소 이동 속도는 150.0f으로 제한 (너무 느려져서 멈추는 것 방지)
-    float NewSpeed = FMath::Clamp(DefaultWalkSpeed - WeightPenalty, 150.0f, DefaultWalkSpeed);
-
-    GetCharacterMovement()->MaxWalkSpeed = NewSpeed;
-
-    CHAR_LOG(Verbose, TEXT("Weight: %.1f kg -> Speed Updated: %.1f (Penalty: -%.1f)"),
-        CurrentTotalWeight, NewSpeed, WeightPenalty);
+    GetCharacterMovement()->MaxWalkSpeed = FMath::Clamp(DefaultWalkSpeed - WeightPenalty, 150.0f, DefaultWalkSpeed);
 }
 
 void ABaseCharacter::SetArmorColor(EArmorSlot Slot, FLinearColor Color)

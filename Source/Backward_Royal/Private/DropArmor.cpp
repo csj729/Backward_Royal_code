@@ -41,35 +41,29 @@ void ADropArmor::BeginPlay()
 	}
 }
 
-bool ADropArmor::OnPickup(APlayerCharacter* PlayerCharacter)
+bool ADropArmor::OnPickup(ABaseCharacter* Character)
 {
 	// 1. 유효성 검사
-	if (!PlayerCharacter)
+	if (!Character)
 	{
-		ARMOR_LOG(Warning, TEXT("OnPickup Failed: PlayerCharacter is NULL"));
+		ARMOR_LOG(Warning, TEXT("OnPickup Failed: Character is NULL"));
 		return false;
 	}
 
-	// 2. 데이터 유효성 검사 (데이터가 비어있으면 장착 불가)
+	// 2. 데이터 유효성 검사
 	if (!ArmorData.ArmorMesh)
 	{
 		ARMOR_LOG(Warning, TEXT("OnPickup Failed: ArmorMesh is NULL in ArmorData"));
 		return false;
 	}
 
-	ARMOR_LOG(Log, TEXT("Picking up Armor: %s (Slot: %d) -> Equipping to Player %s"),
-		*ArmorData.RowName.ToString(), (uint8)ArmorData.EquipSlot, *PlayerCharacter->GetName());
+	ARMOR_LOG(Log, TEXT("Picking up Armor: %s (Slot: %d) -> Equipping to %s"),
+		*ArmorData.RowName.ToString(), (uint8)ArmorData.EquipSlot, *Character->GetName());
 
-	// ==========================================================================================
-	// [핵심 로직] 캐릭터에게 방어구 장착 요청
-	// BaseCharacter::EquipArmor 함수 내부에서 다음 일이 일어납니다:
-	// 1. Slot(예: Chest)에 맞는 메쉬 컴포넌트(ChestMesh)를 찾음
-	// 2. 그 컴포넌트의 SkeletalMesh를 ArmorData.ArmorMesh로 교체
-	// 3. (이미 설정된 Leader Pose에 의해) 캐릭터 애니메이션을 따라 움직임
-	// ==========================================================================================
-	PlayerCharacter->EquipArmor(ArmorData.EquipSlot, ArmorData);
+	// 3. 장착 요청
+	// EquipArmor가 BaseCharacter로 이동했으므로, 캐스팅 없이 바로 호출 가능합니다.
+	Character->EquipArmor(ArmorData.EquipSlot, ArmorData);
 
-	// 3. true를 반환하면 부모 클래스(DropItem)의 Interact 함수에서 Destroy()를 호출하여
-	//    바닥에 떨어진 이 아이템을 삭제합니다.
+	// true 반환 시 DropItem::Interact에서 Destroy() 호출됨
 	return true;
 }

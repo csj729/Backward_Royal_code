@@ -3,6 +3,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "DrawDebugHelpers.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "BaseCharacter.h"
 #include "GameFramework/Character.h"
 
 // 로그 카테고리 정의
@@ -11,49 +12,112 @@ DEFINE_LOG_CATEGORY(LogBaseWeapon);
 ABaseWeapon::ABaseWeapon()
 {
     PrimaryActorTick.bCanEverTick = true;
-
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
     RootComponent = WeaponMesh;
 
-    // 물리 트레이스를 직접 수행하므로, 메쉬 자체의 충돌 이벤트는 비활성화하거나 QueryOnly로 설정
-    WeaponMesh->SetCollisionProfileName(TEXT("NoCollision"));
+    // [중요 수정 1] 물리가 적용되려면 반드시 'Movable'이어야 합니다.
+    WeaponMesh->SetMobility(EComponentMobility::Movable);
 
-    // 기본값 설정
-    TraceChannel = ECC_Pawn; // 캐릭터를 감지하도록 설정
+    WeaponMesh->SetCollisionProfileName(TEXT("Custom"));
+
+    TraceChannel = ECC_Pawn;
     bShowDebugTrace = false;
     bIsAttacking = false;
+    bIsEquipped = false;
 
-    // 기본 스탯 초기화 (나중에 CSV/JSON에서 덮어씌워짐)
     WeaponStats.BaseDamage = 10.0f;
-    WeaponStats.MassKg = 1.5f; // 예: 1.5kg 한손검
+    WeaponStats.MassKg = 1.5f;
 }
 
 void ABaseWeapon::BeginPlay()
 {
     Super::BeginPlay();
 
-    WEAPON_LOG(Display, TEXT("Weapon Initialized. Mass: %f kg"), WeaponStats.MassKg);
+    if (!bIsEquipped && GetOwner() == nullptr)
+    {
+        InitializeDropPhysics();
+        WEAPON_LOG(Log, TEXT("Spawned in World. Physics Initialized."));
+    }
 
-    // 소켓 초기 위치 캐싱
+    // 소켓 캐싱
     for (const FName& SocketName : TraceSocketNames)
     {
         if (WeaponMesh->DoesSocketExist(SocketName))
         {
             PreviousSocketLocations.Add(SocketName, WeaponMesh->GetSocketLocation(SocketName));
-        }
-        else
-        {
-            WEAPON_LOG(Warning, TEXT("Socket '%s' not found on WeaponMesh!"), *SocketName.ToString());
         }
     }
 }
 
+void ABaseWeapon::InitializeDropPhysics()
+{
+    if (!WeaponMesh) return;
+
+    // 1. 충돌 프로필을 Custom으로 변경 (개별 채널 조작을 위해)
+    WeaponMesh->SetCollisionProfileName(TEXT("Custom"));
+
+    // 2. 물리 시뮬레이션 켜기
+    WeaponMesh->SetSimulatePhysics(true);
+
+    // 3. 일단 '모든' 채널 무시 (초기화) -> 캐릭터(Pawn)와 부딪히지 않게 됨
+    WeaponMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
+
+    // 4. 필요한 채널만 켜기 (Whitelist 방식)
+    // - 바닥/벽(WorldStatic, WorldDynamic)과는 충돌해야 멈춤
+    WeaponMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
+    WeaponMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
+
+    // - 줍기(LineTrace) 기능을 위해 Visibility는 Block 유지
+    WeaponMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+
+    // - (옵션) 투사체 등 다른 물리는 무시하거나 튕기게 설정 가능
+    // WeaponMesh->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block); 
+}
+
+// [수정됨] ABaseCharacter에게 직접 장착 요청
+void ABaseWeapon::Interact(ABaseCharacter* Character)
+{
+    if (!Character) return;
+    if (bIsEquipped) return;
+
+    WEAPON_LOG(Log, TEXT("Interaction: Picked up by %s"), *Character->GetName());
+
+    // PlayerCharacter로 캐스팅할 필요 없음
+    Character->EquipWeapon(this);
+}
+
+FText ABaseWeapon::GetInteractionPrompt()
+{
+    return FText::Format(NSLOCTEXT("Interaction", "PickupWeapon", "줍기: {0}"), FText::FromString(GetName()));
+}
+
+void ABaseWeapon::OnEquipped()
+{
+    bIsEquipped = true;
+    bIsAttacking = false;
+    WeaponMesh->SetSimulatePhysics(false);
+    WeaponMesh->SetCollisionProfileName(TEXT("NoCollision"));
+}
+
+void ABaseWeapon::OnDropped()
+{
+    bIsEquipped = false;
+    bIsAttacking = false;
+
+    DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+    InitializeDropPhysics();
+
+    WEAPON_LOG(Log, TEXT("Weapon Dropped. Physics restored via Helper function."));
+}
+
+// ... 공격 관련 로직(StartAttack, Tick 등)은 기존 유지 ...
 void ABaseWeapon::StartAttack()
 {
+    if (!bIsEquipped) return;
     bIsAttacking = true;
-    HitActors.Empty(); // 타격 목록 초기화
+    HitActors.Empty();
 
-    // 공격 시작 시점의 위치로 갱신 (공격 안 할 때 텔레포트 등으로 위치가 튀는 것 방지)
     for (const FName& SocketName : TraceSocketNames)
     {
         if (WeaponMesh->DoesSocketExist(SocketName))
@@ -61,28 +125,23 @@ void ABaseWeapon::StartAttack()
             PreviousSocketLocations.Add(SocketName, WeaponMesh->GetSocketLocation(SocketName));
         }
     }
-
-    WEAPON_LOG(Log, TEXT("Attack Trace Started"));
 }
 
 void ABaseWeapon::EndAttack()
 {
     bIsAttacking = false;
-    WEAPON_LOG(Log, TEXT("Attack Trace Ended"));
 }
 
 void ABaseWeapon::Tick(float DeltaTime)
 {
     Super::Tick(DeltaTime);
 
-    // 공격 중일 때만 물리 트레이스 및 데미지 판정 수행
-    if (bIsAttacking)
+    if (bIsEquipped && bIsAttacking)
     {
         PerformWeaponTrace();
     }
     else
     {
-        // 공격 중이 아닐 때도 위치는 계속 추적해야 다음 공격 시작 시 궤적이 튀지 않음
         for (const FName& SocketName : TraceSocketNames)
         {
             if (WeaponMesh->DoesSocketExist(SocketName))

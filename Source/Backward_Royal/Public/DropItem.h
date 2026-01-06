@@ -3,14 +3,15 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "InteractableInterface.h"
 #include "DropItem.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogDropItem, Log, All);
 
-class APlayerCharacter;
+class ABaseCharacter;
 
 UCLASS()
-class BACKWARD_ROYAL_API ADropItem : public AActor
+class BACKWARD_ROYAL_API ADropItem : public AActor, public IInteractableInterface
 {
 	GENERATED_BODY()
 
@@ -23,14 +24,14 @@ protected:
 #define DROP_LOG(Verbosity, Format, ...) UE_LOG(LogDropItem, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
 public:
-	// [변경] ItemMesh 삭제 -> 자식 클래스가 각자 알맞은 컴포넌트를 가집니다.
-	// 대신 위치 기준점이 될 Root가 필요합니다.
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	class USceneComponent* SceneRoot;
 
-	// 상호작용 함수
-	void Interact(APlayerCharacter* PlayerCharacter);
+	// --- Interface Implementation ---
+	virtual void Interact(class ABaseCharacter* Character) override;
+	virtual FText GetInteractionPrompt() override;
 
 protected:
-	virtual bool OnPickup(APlayerCharacter* PlayerCharacter);
+	// 자식 클래스(DropArmor)에서 실제 데이터 획득 로직 구현
+	virtual bool OnPickup(ABaseCharacter* Character);
 };

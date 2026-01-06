@@ -18,7 +18,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
-	virtual bool OnPickup(class APlayerCharacter* PlayerCharacter) override;
+	virtual bool OnPickup(class ABaseCharacter* Character) override;
 
 #define ARMOR_LOG(Verbosity, Format, ...) UE_LOG(LogDropArmor, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
