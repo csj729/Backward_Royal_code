@@ -1,0 +1,49 @@
+# ===== Unreal Engine 기본 =====
+.vs/
+Binaries/
+DerivedDataCache/
+Intermediate/
+Content/
+Saved/
+Build/
+
+# ===== 대용량 에셋 =====
+*.uasset
+*.umap
+*.apex
+*.psk
+*.psa
+*.fbx
+*.wav
+*.mp3
+*.ogg
+*.png
+*.jpg
+*.tga
+*.hdr
+*.dds
+*.zip
+
+# ===== 프로젝트 설정/로그 =====
+*.log
+*.vsconfig
+*.opensdf
+*.sdf
+*.suo
+*.xcodeproj
+*.xcworkspace
+
+# ===== 자동 생성되는 파일 =====
+*.pdb
+*.idb
+*.sln
+*.sln.DotSettings
+*.sln.DotSettings.user
+
+# ===== Mac / OS 특수 파일 =====
+.DS_Store
+.Trashes
+Thumbs.db
+
+# ===== Visual Studio Code 설정 =====
+.vscode/
