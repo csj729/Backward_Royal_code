@@ -8,16 +8,8 @@
 UENUM(BlueprintType)
 enum class EWeaponType : uint8
 {
-    OneHandSword,
-    Shield,
-    GreatSword,
-    Dagger,
-    GreatAxe,
-    Bow,
-    Crossbow,
-    Hammer,
-    GreatHammer,
-    Staff,
+    OneHand,
+    TwoHand,
     None
 };
 
@@ -36,6 +28,9 @@ struct FWeaponData : public FTableRowBase
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UStaticMeshComponent* WeaponMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float BaseDamage; // 기본 데미지
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -49,4 +44,7 @@ struct FWeaponData : public FTableRowBase
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EDamageCategory DamageCategory; // 데미지 타입
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    EWeaponType WeaponType; // 무기 타입
 };

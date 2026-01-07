@@ -54,7 +54,6 @@ void ABaseCharacter::BeginPlay()
     }
 }
 
-// [신규] 무기 장착 구현
 void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 {
     if (!NewWeapon) return;
