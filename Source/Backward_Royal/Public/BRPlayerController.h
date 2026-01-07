@@ -45,6 +45,10 @@ public:
 	UFUNCTION(Exec, Category = "Room")
 	void ShowRoomInfo();
 
+	// 클라이언트 RPC 함수들
+	UFUNCTION(Client, Reliable)
+	void ClientNotifyGameStarting();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

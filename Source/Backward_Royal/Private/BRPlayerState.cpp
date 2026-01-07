@@ -10,6 +10,8 @@ ABRPlayerState::ABRPlayerState()
 	TeamNumber = 0;
 	bIsHost = false;
 	bIsReady = false;
+	bIsLowerBody = true; // 기본값은 하체
+	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
 }
 
 void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -19,6 +21,8 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, TeamNumber);
 	DOREPLIFETIME(ABRPlayerState, bIsHost);
 	DOREPLIFETIME(ABRPlayerState, bIsReady);
+	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
+	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
 }
 
 void ABRPlayerState::BeginPlay()
@@ -99,6 +103,29 @@ void ABRPlayerState::OnRep_IsHost()
 }
 
 void ABRPlayerState::OnRep_IsReady()
+{
+	// UI 업데이트를 위한 이벤트 발생 가능
+}
+
+void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
+{
+	if (HasAuthority())
+	{
+		bIsLowerBody = bLowerBody;
+		ConnectedPlayerIndex = ConnectedIndex;
+		FString PlayerName = GetPlayerName();
+		if (PlayerName.IsEmpty())
+		{
+			PlayerName = TEXT("Unknown Player");
+		}
+		FString RoleName = bLowerBody ? TEXT("하체") : TEXT("상체");
+		UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: %s 역할 할당 (연결된 플레이어 인덱스: %d)"), 
+			*PlayerName, *RoleName, ConnectedIndex);
+		OnRep_PlayerRole();
+	}
+}
+
+void ABRPlayerState::OnRep_PlayerRole()
 {
 	// UI 업데이트를 위한 이벤트 발생 가능
 }

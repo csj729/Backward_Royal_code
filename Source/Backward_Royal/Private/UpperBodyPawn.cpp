@@ -172,6 +172,9 @@ void AUpperBodyPawn::Look(const FInputActionValue& Value)
 
 void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 {
+	// 1. 이미 공격 중이면 즉시 리턴하여 입력을 무시
+	if (bIsAttacking) return;
+
 	if (!ParentBodyCharacter)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
@@ -179,9 +182,42 @@ void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 
 	if (ParentBodyCharacter)
 	{
-		// 하체 캐릭터에게 공격 신호를 보냄
-		ParentBodyCharacter->TriggerUpperBodyAttack();
+		UAnimInstance* AnimInst = ParentBodyCharacter->GetMesh()->GetAnimInstance();
+		if (AnimInst)
+		{
+			// 2. 공격 상태로 전환
+			bIsAttacking = true;
+
+			// 3. 몽타주 종료 델리게이트 설정
+			FOnMontageEnded EndDelegate;
+			EndDelegate.BindUObject(this, &AUpperBodyPawn::OnAttackMontageEnded);
+
+			// 4. 캐릭터에게 공격 요청 (TriggerUpperBodyAttack이 내부적으로 Montage_Play를 호출한다고 가정)
+			ParentBodyCharacter->TriggerUpperBodyAttack();
+
+			// 5. 현재 재생 중인 몽타주에 종료 델리게이트를 바인딩
+			// 캐릭터가 재생한 몽타주를 찾아서 연결합니다.
+			UAnimMontage* CurrentMontage = ParentBodyCharacter->GetCurrentMontage();
+			if (CurrentMontage)
+			{
+				AnimInst->Montage_SetEndDelegate(EndDelegate, CurrentMontage);
+			}
+			else
+			{
+				// 만약 몽타주 재생에 실패했다면 즉시 상태 복구
+				bIsAttacking = false;
+			}
+		}
 	}
+}
+
+void AUpperBodyPawn::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
+{
+	// 공격 상태 해제 -> 이제 다시 공격 입력이 가능해집니다.
+	bIsAttacking = false;
+
+	// 로그로 확인
+	UE_LOG(LogTemp, Display, TEXT("Attack Montage Ended. Ready for next attack."));
 }
 
 void AUpperBodyPawn::Interact(const FInputActionValue& Value)

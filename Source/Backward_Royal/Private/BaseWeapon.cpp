@@ -14,7 +14,6 @@ ABaseWeapon::ABaseWeapon()
 
     // 1. 메시 생성 및 루트 설정
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
-    WeaponMesh = WeaponStats.WeaponMesh;
     RootComponent = WeaponMesh;
 
     // 2. 충돌 설정 (매우 중요)
@@ -37,13 +36,30 @@ ABaseWeapon::ABaseWeapon()
     WeaponMesh->bTraceComplexOnMove = true;
 
     bIsEquipped = false;
+    GripSocketName = TEXT("Grip");
+
+    DamageCoefficient = 1.0f;
+    ImpulseCoefficient = 1.0f;
+    AttackSpeedCoefficient = 1.0f;
+}
+
+void ABaseWeapon::OnConstruction(const FTransform& Transform)
+{
+    Super::OnConstruction(Transform);
+    // 에디터에서 스태틱 메시 에셋 변경 시 즉시 반영
+    if (WeaponStats.WeaponMesh)
+    {
+        WeaponMesh->SetStaticMesh(WeaponStats.WeaponMesh);
+    }
 }
 
 void ABaseWeapon::BeginPlay()
 {
     Super::BeginPlay();
 
-    // 메시 자체의 Hit 이벤트 바인딩
+    // 초기 데이터 기반으로 물리 설정 적용
+    InitializeWeaponStats(WeaponStats);
+
     if (WeaponMesh)
     {
         WeaponMesh->OnComponentHit.AddDynamic(this, &ABaseWeapon::OnWeaponHit);
@@ -134,45 +150,54 @@ void ABaseWeapon::OnDropped()
     }
 }
 
+void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
+{
+    WeaponStats = NewStats;
+
+    if (WeaponMesh && WeaponStats.WeaponMesh)
+    {
+        // 1. 메시 할당 (WeaponStats에 정의된 스태틱 메시 사용)
+        WeaponMesh->SetStaticMesh(WeaponStats.WeaponMesh);
+
+        // 2. 물리 질량 설정 (무게 반영)
+        if (WeaponStats.MassKg > 0.0f)  
+        {
+            WeaponMesh->SetMassOverrideInKg(NAME_None, WeaponStats.MassKg, true);
+        }
+    }
+}
+
 void ABaseWeapon::OnWeaponHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-    // 유효성 검사: 대상이 있고, 자기 자신이나 소유자가 아니어야 함
     if (OtherActor && OtherActor != this && OtherActor != GetOwner() && bIsEquipped)
     {
-        // [핵심] 이미 이번 휘두르기에 맞았던 액터인지 확인
-        if (HitActors.Contains(OtherActor))
+        if (HitActors.Contains(OtherActor)) return;
+
+        // [수정] 기본 데미지(BaseDamage) 기반 데미지 계산
+        // 단순히 충격량뿐만 아니라 무기 자체의 공격력을 반영합니다.
+        float ImpactForce = NormalImpulse.Size();
+        float CalculatedDamage = ImpactForce * DamageCoefficient * 0.01f;
+
+        if(CalculatedDamage < 5.0f)
         {
-            return; // 이미 맞았으면 아무것도 안 함
+            UGameplayStatics::ApplyDamage(
+                OtherActor,
+                CalculatedDamage,
+                GetInstigatorController(),
+                this,
+                UDamageType::StaticClass()
+            );
         }
 
-        // 충격량 계산 로직
-        float ImpactForce = NormalImpulse.Size();
-        float DamageCoefficient = 0.01f;
-        float CalculatedDamage = ImpactForce * DamageCoefficient;
-
-        if (CalculatedDamage < 5.0f) return;
-        CalculatedDamage = FMath::Min(CalculatedDamage, 100.0f);
-
-        LOG_WEAPON(Warning, "MESH HIT! Force: %.2f -> Damage: %.2f", ImpactForce, CalculatedDamage);
-
-        // 2. 데미지 적용
-        UGameplayStatics::ApplyDamage(
-            OtherActor,
-            CalculatedDamage,
-            GetInstigatorController(),
-            this,
-            UDamageType::StaticClass()
-        );  
-
-        // 3. 물리 반동 적용
         if (OtherComp && OtherComp->IsSimulatingPhysics())
         {
+            LOG_WEAPON(Display, "Add Impulse");
+
             FVector HitDirection = -Hit.ImpactNormal;
-            float PushMultiplier = 0.5f;
-            OtherComp->AddImpulseAtLocation(HitDirection * ImpactForce * PushMultiplier, Hit.ImpactPoint);
+            // 무기 무게가 무거울수록 더 강하게 밀어냄
+            OtherComp->AddImpulseAtLocation(HitDirection * ImpactForce * ImpulseCoefficient, Hit.ImpactPoint);
         }
 
-        // [핵심] 맞은 대상을 목록에 추가하여 다음 히트 시 무시되도록 함
         HitActors.Add(OtherActor);
         ApplyHitStop();
     }

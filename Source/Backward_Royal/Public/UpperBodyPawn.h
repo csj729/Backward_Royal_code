@@ -29,6 +29,9 @@ protected:
 	void Attack(const FInputActionValue& Value);
 	void Interact(const FInputActionValue& Value);
 
+	UFUNCTION()
+	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class USpringArmComponent* FrontCameraBoom;

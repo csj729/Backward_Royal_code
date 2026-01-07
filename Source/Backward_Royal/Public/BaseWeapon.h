@@ -3,7 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "InteractableInterface.h" // 인터페이스 포함
+#include "InteractableInterface.h"
 #include "WeaponTypes.h"
 #include "BaseWeapon.generated.h"
 
@@ -15,19 +15,38 @@ class BACKWARD_ROYAL_API ABaseWeapon : public AActor, public IInteractableInterf
 public:
     ABaseWeapon();
 
+    /** 무기 밸런스 계수 설정 */
+
+    // 데미지 계산 시 곱해지는 계수
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon | Stats")
+    float DamageCoefficient;
+
+    // 충격량(물리적 밀어내기) 계산 시 곱해지는 계수
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon | Stats")
+    float ImpulseCoefficient;
+
+    // 애니메이션 재생 속도 조절용 계수
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon | Stats")
+    float AttackSpeedCoefficient;
+
     // --- 인터페이스 구현 ---
     virtual void Interact(class ABaseCharacter* Character) override;
     virtual FText GetInteractionPrompt() override;
 
-    // --- 무기 고유 기능 ---
-    // 캐릭터 손에 맞출 무기 쪽 소켓 이름 (기본값 "Grip")
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    FName GripSocketName;
+    // --- 무기 데이터 및 메시 ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     UStaticMeshComponent* WeaponMesh;
 
+    // [수정] 무기 고유 스탯 (메시, 데미지, 무게 등 포함)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FWeaponData WeaponStats;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
+    FName GripSocketName;
+
+    // [추가] 데이터 테이블 등에서 가져온 정보를 실제 컴포넌트에 적용하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Weapon")
+    void InitializeWeaponStats(const FWeaponData& NewStats);
 
     UFUNCTION(BlueprintCallable, Category = "Weapon")
     void StartAttack();
@@ -35,15 +54,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Weapon")
     void StopAttack();
 
-    // 히트 스톱을 실행할 함수
     void ApplyHitStop();
 
-    // 장착/해제 시 호출될 이벤트
     virtual void OnEquipped();
     virtual void OnDropped();
 
 protected:
     virtual void BeginPlay() override;
+    virtual void OnConstruction(const FTransform& Transform) override; // 에디터에서 수치 변경 시 즉시 반영
 
     UFUNCTION()
     void OnWeaponHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);

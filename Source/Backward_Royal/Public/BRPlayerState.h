@@ -25,6 +25,16 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_IsReady, BlueprintReadWrite, Category = "Room")
 	bool bIsReady;
 
+	// 하체 역할 여부 (true = 하체, false = 상체)
+	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
+	bool bIsLowerBody;
+
+	// 연결된 플레이어 인덱스
+	// 하체인 경우: 연결된 상체 플레이어의 인덱스 (-1이면 아직 없음)
+	// 상체인 경우: 연결된 하체 플레이어의 인덱스
+	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
+	int32 ConnectedPlayerIndex;
+
 	// 팀 번호 설정
 	UFUNCTION(BlueprintCallable, Category = "Team")
 	void SetTeamNumber(int32 NewTeamNumber);
@@ -48,6 +58,14 @@ public:
 	// 준비 상태 변경 시 호출되는 이벤트
 	UFUNCTION()
 	void OnRep_IsReady();
+
+	// 플레이어 역할 설정
+	UFUNCTION(BlueprintCallable, Category = "Player Role")
+	void SetPlayerRole(bool bLowerBody, int32 ConnectedIndex);
+
+	// 플레이어 역할 변경 시 호출되는 이벤트
+	UFUNCTION()
+	void OnRep_PlayerRole();
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
