@@ -1,6 +1,7 @@
 #include "UpperBodyPawn.h"
 #include "PlayerCharacter.h"
 #include "DropItem.h"
+#include "InteractableInterface.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Components/SceneComponent.h"
@@ -9,6 +10,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "Components/SkeletalMeshComponent.h" 
 #include "DrawDebugHelpers.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogUpperBodyPawn, Log, All);
+#define BODY_LOG(Verbosity, Format, ...) UE_LOG(LogUpperBodyPawn, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
 AUpperBodyPawn::AUpperBodyPawn()
 {
@@ -132,7 +136,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	{
 		CurrentControlRot.Yaw = BodyFrontYaw + ClampedYaw;
 		CurrentControlRot.Pitch = ClampedPitch;
-		Controller->SetControlRotation(CurrentControlRot);	
+		Controller->SetControlRotation(CurrentControlRot);
 	}
 }
 
@@ -184,7 +188,6 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 {
 	// =================================================================
 	// [테스트 1] 입력 확인용 메시지 출력
-	// E키를 누르면 화면 왼쪽 위에 초록색 글씨가 뜹니다.
 	// =================================================================
 	if (GEngine)
 	{
@@ -212,11 +215,10 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 	{
 		// 만약 소켓을 못 찾으면 안전하게 카메라 위치 사용 (혹은 로그 출력)
 		Start = FrontCamera->GetComponentLocation();
-		UE_LOG(LogTemp, Warning, TEXT("Cannot find 'head' socket on HeadMesh. Using Camera location instead."));
+		BODY_LOG(Warning, TEXT("Cannot find 'head' socket on HeadMesh. Using Camera location instead."));
 	}
 
 	// 방향: 카메라는 계속 정면을 보고 있으므로, 카메라의 Forward Vector를 사용합니다.
-	// (머리에서 발사되지만, 플레이어가 보고 있는 방향으로 나갑니다)
 	FVector End = Start + (FrontCamera->GetForwardVector() * InteractionDistance);
 
 	FHitResult HitResult;
@@ -224,7 +226,7 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 	QueryParams.AddIgnoredActor(this);
 	QueryParams.AddIgnoredActor(ParentBodyCharacter);
 
-	// 3. 레이캐스트 발사
+	// 3. 레이캐스트 발사 (무기와 아이템 모두 Visibility 채널 Block 설정이 되어있어야 함)
 	bool bHit = GetWorld()->LineTraceSingleByChannel(
 		HitResult,
 		Start,
@@ -234,8 +236,7 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 	);
 
 	// =================================================================
-	// [테스트 2] 레이캐스트 시각화 (레이저 쏘기)
-	// 충돌 시 초록색, 허공이면 빨간색 선이 2초간 표시됩니다.
+	// [테스트 2] 레이캐스트 시각화
 	// =================================================================
 	if (bHit)
 	{
@@ -247,20 +248,25 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 2.0f, 0, 1.0f);
 	}
 
-	// 4. 아이템 확인 및 상호작용
+	// 4. 아이템/무기 확인 및 상호작용
 	if (bHit)
 	{
-		if (ADropItem* DetectedItem = Cast<ADropItem>(HitResult.GetActor()))
+		AActor* HitActor = HitResult.GetActor();
+
+		// 이를 통해 무기(BaseWeapon)와 아이템(DropItem) 모두 상호작용 가능해짐
+		if (IInteractableInterface* Interface = Cast<IInteractableInterface>(HitActor))
 		{
-			// 화면에 감지된 아이템 이름 출력
+			// 화면에 감지된 대상 이름 출력
 			if (GEngine)
 			{
-				FString Msg = FString::Printf(TEXT("Item Detected: %s"), *DetectedItem->GetName());
+				FString Msg = FString::Printf(TEXT("Interactable Detected: %s"), *HitActor->GetName());
 				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, Msg);
 			}
 
-			// 아이템 획득 시도
-			DetectedItem->Interact(ParentBodyCharacter);
+			BODY_LOG(Log, TEXT("Interacting with %s"), *HitActor->GetName());
+
+			// 인터페이스 함수 호출 (무기 장착 or 아이템 획득)
+			Interface->Interact(ParentBodyCharacter);
 		}
 	}
 }

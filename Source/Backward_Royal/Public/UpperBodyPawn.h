@@ -65,9 +65,4 @@ private:
 
 	// [추가] 지난 프레임의 몸통 각도를 저장할 변수
 	float LastBodyYaw;
-
-	// 몽타주 종료 시 호출될 델리게이트 함수
-	//UFUNCTION()
-	//void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
-
 };

@@ -59,35 +59,57 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 {
     if (!NewWeapon) return;
 
-    // 기존 무기 버리기 (교체)
+    // 기존 무기 제거
     if (CurrentWeapon)
     {
         DropCurrentWeapon();
     }
 
     CurrentWeapon = NewWeapon;
-
-    // 1. 소유권 설정 (AI나 플레이어가 데미지를 입혔을 때 판정용)
     CurrentWeapon->SetOwner(this);
-
-    // 2. 무기 상태 변경 (물리 끄기, 충돌 끄기 등)
     CurrentWeapon->OnEquipped();
 
-    // 3. 소켓 부착
-    FName SocketName = TEXT("WeaponSocket");
+    // -------------------------------------------------------
+    // [장착 로직] 무기(Grip) <-> 캐릭터(RightHandSocket) 일치시키기
+    // -------------------------------------------------------
+    FName CharacterSocketName = TEXT("RightHandSocket");
 
-    // 장갑(HandMesh)이 있다면 거기에, 없으면 몸통(GetMesh)에 부착
-    USkeletalMeshComponent* AttachTarget = HandMesh ? HandMesh : GetMesh();
-
-    if (AttachTarget->DoesSocketExist(SocketName))
+    // 무기 소켓 이름 (무기 BP에서 설정 가능, 기본값 "Grip")
+    FName WeaponGripSocketName = NewWeapon->GripSocketName;
+    if (WeaponGripSocketName.IsNone())
     {
-        CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, SocketName);
+        WeaponGripSocketName = TEXT("Grip");
+    }
+
+    USkeletalMeshComponent* AttachTarget = GetMesh();
+
+    // 1. 일단 캐릭터의 손 소켓에 무기를 부착 (이 시점엔 무기의 원점이 손에 붙음)
+    if (AttachTarget->DoesSocketExist(CharacterSocketName))
+    {
+        CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, CharacterSocketName);
     }
     else
     {
-        // 소켓 없으면 임시로 오른손 뼈에 부착
+        // 소켓이 없으면 안전하게 hand_r에 부착
         CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
-        CHAR_LOG(Warning, TEXT("Socket 'WeaponSocket' not found. Attached to 'hand_r' instead."));
+        CHAR_LOG(Warning, TEXT("Socket '%s' missing. Attached to 'hand_r'."), *CharacterSocketName.ToString());
+    }
+
+    // 2. 무기 메쉬에 'Grip' 소켓이 있다면 위치 보정 수행
+    if (CurrentWeapon->WeaponMesh && CurrentWeapon->WeaponMesh->DoesSocketExist(WeaponGripSocketName))
+    {
+        // (1) 무기 원점 기준, Grip 소켓의 상대 위치(Transform)를 가져옴
+        FTransform GripTransform = CurrentWeapon->WeaponMesh->GetSocketTransform(WeaponGripSocketName, RTS_Component);
+
+        // (2) 그 위치의 역(Inverse)을 무기의 상대 Transform으로 설정
+        // 원리: Grip이 (10,0,0)에 있다면 무기를 (-10,0,0)으로 옮겨야 Grip이 (0,0,0)인 손 위치에 오게 됨
+        CurrentWeapon->SetActorRelativeTransform(GripTransform.Inverse());
+
+        CHAR_LOG(Log, TEXT("Adjusted weapon position using socket '%s'"), *WeaponGripSocketName.ToString());
+    }
+    else
+    {
+        CHAR_LOG(Warning, TEXT("Weapon socket '%s' not found. Weapon attached at Pivot."), *WeaponGripSocketName.ToString());
     }
 
     CHAR_LOG(Log, TEXT("Equipped Weapon: %s"), *NewWeapon->GetName());
