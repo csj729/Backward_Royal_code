@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "WeaponTypes.h"
 #include "BRGameInstance.generated.h"
 
 UCLASS()
@@ -42,5 +43,13 @@ public:
 	// 현재 상태 확인
 	UFUNCTION(Exec)
 	void ShowRoomInfo();
+
+	// 에디터에서 전역적으로 사용할 무기 데이터 테이블 할당
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
+	UDataTable* WeaponDataTable;
+
+	// 어디서든 ID로 무기 정보를 가져올 수 있는 함수
+	UFUNCTION(BlueprintCallable, Category = "Data")
+	bool GetWeaponData(FName RowName, FWeaponData& OutData);
 };
 

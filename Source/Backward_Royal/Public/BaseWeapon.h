@@ -37,9 +37,12 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     UStaticMeshComponent* WeaponMesh;
 
-    // [수정] 무기 고유 스탯 (메시, 데미지, 무게 등 포함)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    FWeaponData WeaponStats;
+    FName WeaponRowName;
+
+    // 로드된 데이터를 저장할 변수 (내부 로직용)
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")
+    FWeaponData CurrentWeaponData;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FName GripSocketName;
@@ -62,6 +65,9 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override; // 에디터에서 수치 변경 시 즉시 반영
+
+    // 데이터 테이블에서 수치를 읽어오는 헬퍼 함수
+    void LoadWeaponData();
 
     UFUNCTION()
     void OnWeaponHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);

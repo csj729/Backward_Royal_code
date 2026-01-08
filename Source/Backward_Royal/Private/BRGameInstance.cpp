@@ -197,3 +197,22 @@ void UBRGameInstance::ShowRoomInfo()
 	}
 }
 
+bool UBRGameInstance::GetWeaponData(FName RowName, FWeaponData& OutData)
+{
+	if (!WeaponDataTable)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[GameInstance] WeaponDataTable is NULL!"));
+		return false;
+	}
+
+	static const FString ContextString(TEXT("Weapon Data Lookup"));
+	FWeaponData* FoundRow = WeaponDataTable->FindRow<FWeaponData>(RowName, ContextString);
+
+	if (FoundRow)
+	{
+		OutData = *FoundRow;
+		return true;
+	}
+
+	return false;
+}
