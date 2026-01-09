@@ -67,6 +67,8 @@ public:
 	UFUNCTION()
 	void OnRep_PlayerRole();
 
+	void SwapControlWithPartner();
+
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;

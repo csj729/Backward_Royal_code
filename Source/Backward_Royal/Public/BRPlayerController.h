@@ -49,6 +49,17 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyGameStarting();
 
+	// 역할에 따른 입력 매핑 교체 함수
+	UFUNCTION(BlueprintCallable, Category = "Input")
+	void SetupRoleInput(bool bIsLower);
+
+	// 에디터에서 할당할 수 있도록 Mapping Context 변수 추가
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* LowerBodyContext;
+
+	UPROPERTY(EditAnywhere, Category = "Input")
+	class UInputMappingContext* UpperBodyContext;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

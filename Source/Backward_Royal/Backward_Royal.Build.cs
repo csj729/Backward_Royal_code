@@ -20,7 +20,8 @@ public class Backward_Royal : ModuleRules
 			"Slate",
 			"SlateCore",
             "Json",
-            "JsonUtilities"
+            "JsonUtilities",
+            "Niagara"
         });
 	}
 }

@@ -6,6 +6,8 @@
 #include "BRPlayerState.h"
 #include "BRGameMode.h"
 #include "GameFramework/GameModeBase.h"
+#include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 
@@ -728,4 +730,21 @@ void ABRPlayerController::ShowRoomInfo()
 	UE_LOG(LogTemp, Log, TEXT("==================="));
 }
 
+void ABRPlayerController::SetupRoleInput(bool bIsLower)
+{
+	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+		{
+			// 기존 매핑 제거
+			Subsystem->ClearAllMappings();
 
+			// 새로운 역할에 맞는 매핑 추가
+			UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
+			if (TargetContext)
+			{
+				Subsystem->AddMappingContext(TargetContext, 0);
+			}
+		}
+	}
+}

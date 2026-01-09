@@ -77,7 +77,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 1. 부모(몸통) 찾기 및 초기화 (기존 코드 유지)
+	// 1. 부모(몸통) 찾기 및 초기화
 	if (!ParentBodyCharacter)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
@@ -86,7 +86,10 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 		{
 			float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
 			FRotator NewRotation = Controller->GetControlRotation();
+
+			// [복구] 카메라 초기 위치는 엉덩이(등) 쪽이어야 하므로 180도 유지가 맞습니다.
 			NewRotation.Yaw = CurrentBodyYaw + 180.0f;
+
 			Controller->SetControlRotation(NewRotation);
 			LastBodyYaw = CurrentBodyYaw;
 			return;
@@ -95,7 +98,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 
 	if (!ParentBodyCharacter || !Controller) return;
 
-	// 2. 몸통 회전 동기화 (기존 코드 유지)
+	// 2. 몸통 회전 동기화 (탱크가 회전하면 상체 카메라도 같이 회전)
 	float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
 	float DeltaYaw = CurrentBodyYaw - LastBodyYaw;
 
@@ -113,19 +116,14 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	// -----------------------------------------------------------------
 	FRotator CurrentControlRot = Controller->GetControlRotation();
 
-	// 3. 좌우(Yaw) 시야각 제한 (기존 코드 유지)
+	// 3. 좌우(Yaw) 시야각 제한 (등 뒤 기준)
+	// [복구] 기준점도 다시 +180(등 뒤)으로 잡습니다.
 	float BodyFrontYaw = ParentBodyCharacter->GetActorRotation().Yaw + 180.0f;
 	float RelativeYaw = FRotator::NormalizeAxis(CurrentControlRot.Yaw - BodyFrontYaw);
 	float ClampedYaw = FMath::Clamp(RelativeYaw, -90.0f, 90.0f);
 
-	// =================================================================
-	// [수정된 부분] 4. 위아래(Pitch) 시야각 제한
-	// 기존: FMath::Clamp(CurrentPitch, 0.0f, 90.0f); -> 정면 아래 불가
-	// 변경: FMath::Clamp(CurrentPitch, -90.0f, 90.0f); -> 바닥(-90)부터 하늘(90)까지 가능
-	// =================================================================
+	// 4. 위아래(Pitch) 시야각 제한
 	float CurrentPitch = FRotator::NormalizeAxis(CurrentControlRot.Pitch);
-
-	// -90도(수직 아래) ~ 90도(수직 위)까지 허용
 	float ClampedPitch = FMath::Clamp(CurrentPitch, -90.0f, 90.0f);
 
 	// 5. 제한된 각도 적용
@@ -137,6 +135,21 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 		CurrentControlRot.Yaw = BodyFrontYaw + ClampedYaw;
 		CurrentControlRot.Pitch = ClampedPitch;
 		Controller->SetControlRotation(CurrentControlRot);
+	}
+
+	// =================================================================
+	// [진짜 해결책] 상체 시선 전달 (머리 방향 교정)
+	// =================================================================
+	if (ParentBodyCharacter)
+	{
+		// 문제 원인: 카메라는 180도(등 뒤)를 보고 있는데, 그 값을 그대로 머리에 주니까
+		// 머리도 180도 뒤를 봐서 "엑소시스트"가 되는 것입니다.
+
+		// 해결: 머리(애니메이션)에 전달할 때만 180도를 다시 뒤집어서 "앞"을 보게 만듭니다.
+		FRotator TargetHeadRot = Controller->GetControlRotation();
+		TargetHeadRot.Yaw += 180.0f;
+
+		ParentBodyCharacter->SetUpperBodyRotation(TargetHeadRot);
 	}
 }
 
@@ -163,11 +176,6 @@ void AUpperBodyPawn::Look(const FInputActionValue& Value)
 	AddControllerYawInput(LookAxisVector.X);
 	AddControllerPitchInput(LookAxisVector.Y * -1.0f); // 마우스 Y축 반전 (위로 올리면 위를 봄)
 
-	if (ParentBodyCharacter)
-	{
-		// 애니메이션 블루프린트로 회전값을 전달 (허리 비틀기용)
-		ParentBodyCharacter->SetUpperBodyRotation(GetControlRotation());
-	}
 }
 
 void AUpperBodyPawn::Attack(const FInputActionValue& Value)
