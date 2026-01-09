@@ -55,22 +55,45 @@ void ABaseWeapon::BeginPlay()
 // [핵심] 데이터 테이블에서 정보를 읽어와 적용하는 로직
 void ABaseWeapon::LoadWeaponData()
 {
-    // 1. GameInstance를 가져와서 우리 전역 매니저로 캐스팅
-    UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
-
-    if (GI && !WeaponRowName.IsNone())
+    // 1. 테이블과 행 이름이 유효한지 확인
+    if (MyDataTable && !WeaponRowName.IsNone())
     {
-        // 2. GI에게 ID를 주고 데이터를 채워달라고 요청
-        if (GI->GetWeaponData(WeaponRowName, CurrentWeaponData))
+        static const FString ContextString(TEXT("Weapon Data Context"));
+
+        // 2. 테이블에서 직접 행을 찾음. 
+        // 이 시점에 MyDataTable은 이미 GameInstance에 의해 JSON 수치로 업데이트된 상태입니다.
+        FWeaponData* FoundData = MyDataTable->FindRow<FWeaponData>(WeaponRowName, ContextString);
+
+        if (FoundData)
         {
+            CurrentWeaponData = *FoundData;
+
+            // 3. 실제 컴포넌트(메시, 질량 등)에 수치 적용
             InitializeWeaponStats(CurrentWeaponData);
-            LOG_WEAPON(Display, "Data loaded from GameInstance for: %s", *WeaponRowName.ToString());
+
+            LOG_WEAPON(Display, "Successfully applied JSON-Balanced data for Row: %s", *WeaponRowName.ToString());
+        }
+        else
+        {
+            LOG_WEAPON(Warning, "Failed to find Row [%s] in DataTable [%s]",
+                *WeaponRowName.ToString(), *MyDataTable->GetName());
         }
     }
 }
 
 void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
 {
+    LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Damage: %f, Mass: %f",
+        *WeaponRowName.ToString(), NewStats.BaseDamage, NewStats.MassKg);
+
+    // 화면에 즉시 표시 (디버깅용)
+    if (GEngine)
+    {
+        FString DebugMsg = FString::Printf(TEXT("Weapon: %s | Damage: %.1f | Mass: %.1f"),
+            *WeaponRowName.ToString(), NewStats.BaseDamage, NewStats.MassKg);
+        GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, DebugMsg);
+    }
+
     // NewStats는 이제 데이터 테이블에서 가져온 행 데이터임
     if (WeaponMesh && NewStats.WeaponMesh)
     {

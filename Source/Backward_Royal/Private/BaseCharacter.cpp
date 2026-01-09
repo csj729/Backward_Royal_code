@@ -2,7 +2,7 @@
 #include "BaseCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
-#include "BaseWeapon.h" // [중요] BaseWeapon 기능을 사용하기 위해 Include
+#include "BaseWeapon.h"
 
 DEFINE_LOG_CATEGORY(LogBaseChar);
 

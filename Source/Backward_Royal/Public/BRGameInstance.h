@@ -4,7 +4,10 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "WeaponTypes.h"
+#include "ArmorTypes.h"
 #include "BRGameInstance.generated.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogBRGameInstance, Log, All);
 
 UCLASS()
 class BACKWARD_ROYAL_API UBRGameInstance : public UGameInstance
@@ -44,12 +47,28 @@ public:
 	UFUNCTION(Exec)
 	void ShowRoomInfo();
 
-	// 에디터에서 전역적으로 사용할 무기 데이터 테이블 할당
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data")
-	UDataTable* WeaponDataTable;
+	/** * [확장형 구조]
+	 * Key: JSON 파일 이름 (확장자 제외, 예: "WeaponBalance")
+	 * Value: 매칭될 데이터 테이블 에셋
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Data|Config")
+	TMap<FString, class UDataTable*> ConfigDataMap;
 
-	// 어디서든 ID로 무기 정보를 가져올 수 있는 함수
+	// --- [핵심] JSON 로드 및 밸런싱 적용 ---
+	UFUNCTION(Exec, Category = "Data")
+	void ReloadAllConfigs();
+
+	/** JSON 파일을 읽어 데이터 테이블 업데이트 */
 	UFUNCTION(BlueprintCallable, Category = "Data")
-	bool GetWeaponData(FName RowName, FWeaponData& OutData);
+	void UpdateDataTableFromJson(UDataTable* TargetTable, FString FileName);
+
+	/** 데이터 테이블 변경 사항을 .uasset 파일로 영구 저장 (에디터 전용) */
+	void SaveDataTableToAsset(UDataTable* TargetTable);
+		
+protected:
+	// 실제 JSON 파싱 로직
+	void LoadConfigFromJson(const FString& FileName, class UDataTable* TargetTable);
+
+	FString GetConfigDirectory();
 };
 

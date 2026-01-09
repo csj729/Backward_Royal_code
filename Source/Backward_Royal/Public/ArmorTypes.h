@@ -30,7 +30,7 @@ struct FArmorData : public FTableRowBase
     GENERATED_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FName RowName; // ID
+    FName DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     USkeletalMesh* ArmorMesh; // 적용할 메쉬

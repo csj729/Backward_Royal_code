@@ -7,7 +7,7 @@ DEFINE_LOG_CATEGORY(LogDropArmor);
 
 ADropArmor::ADropArmor()
 {
-	ArmorData.RowName = TEXT("Unknown Armor");
+	ArmorData.DisplayName = TEXT("Unknown Armor");
 
 	// 1. 스켈레탈 메시 컴포넌트 생성
 	ArmorMeshComp = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("ArmorMeshComp"));
@@ -58,7 +58,7 @@ bool ADropArmor::OnPickup(ABaseCharacter* Character)
 	}
 
 	ARMOR_LOG(Log, TEXT("Picking up Armor: %s (Slot: %d) -> Equipping to %s"),
-		*ArmorData.RowName.ToString(), (uint8)ArmorData.EquipSlot, *Character->GetName());
+		*ArmorData.DisplayName.ToString(), (uint8)ArmorData.EquipSlot, *Character->GetName());
 
 	// 3. 장착 요청
 	// EquipArmor가 BaseCharacter로 이동했으므로, 캐스팅 없이 바로 호출 가능합니다.

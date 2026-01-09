@@ -18,7 +18,9 @@ public class Backward_Royal : ModuleRules
 			"OnlineSubsystemUtils",
 			"UMG",
 			"Slate",
-			"SlateCore"
-		});
+			"SlateCore",
+            "Json",
+            "JsonUtilities"
+        });
 	}
 }

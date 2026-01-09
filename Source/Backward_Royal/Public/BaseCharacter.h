@@ -8,6 +8,8 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
 
+#define CHAR_LOG(Verbosity, Format, ...) UE_LOG(LogBaseChar, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
+
 class ABaseWeapon; // 전방 선언
 
 UCLASS()
@@ -20,8 +22,6 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
-#define CHAR_LOG(Verbosity, Format, ...) UE_LOG(LogBaseChar, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
 public:
     // --- Modular Armor Components ---

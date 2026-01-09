@@ -38,6 +38,9 @@ public:
     UStaticMeshComponent* WeaponMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
+    UDataTable* MyDataTable;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FName WeaponRowName;
 
     // 로드된 데이터를 저장할 변수 (내부 로직용)
@@ -50,6 +53,9 @@ public:
     // [추가] 데이터 테이블 등에서 가져온 정보를 실제 컴포넌트에 적용하는 함수
     UFUNCTION(BlueprintCallable, Category = "Weapon")
     void InitializeWeaponStats(const FWeaponData& NewStats);
+
+    // 데이터 테이블에서 수치를 읽어오는 헬퍼 함수
+    void LoadWeaponData();
 
     UFUNCTION(BlueprintCallable, Category = "Weapon")
     void StartAttack();
@@ -65,9 +71,6 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override; // 에디터에서 수치 변경 시 즉시 반영
-
-    // 데이터 테이블에서 수치를 읽어오는 헬퍼 함수
-    void LoadWeaponData();
 
     UFUNCTION()
     void OnWeaponHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
