@@ -139,100 +139,72 @@ void ABRPlayerState::SwapControlWithPartner()
 	if (!HasAuthority()) return;
 
 	ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>();
-	// ConnectedPlayerIndex가 유효한지 확인
-	if (!GS || !GS->PlayerArray.IsValidIndex(ConnectedPlayerIndex))
-	{
-		UE_LOG(LogTemp, Error, TEXT("유효하지 않은 파트너 인덱스입니다: %d"), ConnectedPlayerIndex);
-		return;
-	}
+	if (!GS || !GS->PlayerArray.IsValidIndex(ConnectedPlayerIndex)) return;
 
 	ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedPlayerIndex]);
-	if (!PartnerPS) return;
+	if (!PartnerPS || !PartnerPS->GetOwner()) return;
 
-	// 1. 각자의 컨트롤러와 현재 조종 중인 Pawn 확보
 	ABRPlayerController* MyPC = Cast<ABRPlayerController>(GetOwner());
 	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwner());
 
 	if (MyPC && PartnerPC)
 	{
-		APawn* MyCurrentPawn = MyPC->GetPawn();
+		APawn* MyPawn = MyPC->GetPawn();
 		APawn* PartnerPawn = PartnerPC->GetPawn();
 
-		if (MyCurrentPawn && PartnerPawn)
+		if (MyPawn && PartnerPawn)
 		{
-			// [필수] 빙의 전 기존 관계 정리
+			// 1. 모든 물리적 연결 해제 및 충돌 무시 설정
+			// 상하체 구분
+			APlayerCharacter* LowerChar = Cast<APlayerCharacter>(bIsLowerBody ? MyPawn : PartnerPawn);
+			AUpperBodyPawn* UpperPawn = Cast<AUpperBodyPawn>(bIsLowerBody ? PartnerPawn : MyPawn);
+
+			// 2. 컨트롤러 교체 (Unpossess -> Possess)
 			MyPC->UnPossess();
 			PartnerPC->UnPossess();
 
-			// 2. 교차 빙의 (컨트롤러 스왑)
 			MyPC->Possess(PartnerPawn);
-			PartnerPC->Possess(MyCurrentPawn);
+			PartnerPC->Possess(MyPawn);
 
-			// 3. 상체 부착 상태 재확인 (방어 코드)
-			APlayerCharacter* LowerChar = nullptr;
-			AUpperBodyPawn* UpperPawn = nullptr;
-
-			// 현재 나의 '데이터상' 역할이 하체라면, 내가 새로 잡은 PartnerPawn이 상체여야 함
-			if (bIsLowerBody)
-			{
-				LowerChar = Cast<APlayerCharacter>(MyCurrentPawn);
-				UpperPawn = Cast<AUpperBodyPawn>(PartnerPawn);
-			}
-			else
-			{
-				LowerChar = Cast<APlayerCharacter>(PartnerPawn);
-				UpperPawn = Cast<AUpperBodyPawn>(MyCurrentPawn);
-			}
-
+			// 3. 재부착 (Possess 이후에 수행)
 			if (UpperPawn && LowerChar)
 			{
 				FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, true);
 				UpperPawn->AttachToComponent(LowerChar->HeadMountPoint, AttachRules);
-				UE_LOG(LogTemp, Log, TEXT("상체(%s)를 하체(%s)에 다시 부착했습니다."), *UpperPawn->GetName(), *LowerChar->GetName());
 			}
+
 		}
 
-		// 4. 입력(Input Mapping Context) 및 시점 설정 동기화
-		// 람다 함수를 통해 각 컨트롤러에 새로운 역할 규칙 적용
-		auto ApplyRoleSettings = [this](ABRPlayerController* PC, bool bIsLower)
+		auto FinalizeSettings = [this](ABRPlayerController* PC, bool bLower)
 			{
 				if (!PC) return;
-
-				// [해결: 상체 조작 빠짐] 역할에 맞는 Input Mapping Context 교체
-				// PlayerController에 Mapping Context를 스왑하는 함수가 구현되어 있어야 합니다.
-				PC->SetupRoleInput(bIsLower);
+				PC->SetupRoleInput(bLower);
 
 				APawn* P = PC->GetPawn();
 				if (!P) return;
 
-				if (bIsLower)
+				// [해결: 마우스 회전] 
+				// 컨트롤러의 회전값이 Pawn에 영향을 주도록 설정
+				P->bUseControllerRotationYaw = true;
+
+				if (bLower)
 				{
-					// [해결: 하체 시점 전환] 하체는 캐릭터 회전을 컨트롤러에 맞춤
-					P->bUseControllerRotationYaw = true;
-					if (ACharacter* Character = Cast<ACharacter>(P))
+					if (ACharacter* Char = Cast<ACharacter>(P))
 					{
-						// 이동 기능 활성화 확인
-						Character->GetCharacterMovement()->SetDefaultMovementMode();
+						// 마우스 좌우 회전이 안 된다면 이 두 값이 핵심입니다.
+						Char->bUseControllerRotationYaw = true;
+						Char->GetCharacterMovement()->bOrientRotationToMovement = false;
 					}
 				}
-				else
-				{
-					// 상체는 에임 방향에 따라 회전 (프로젝트 설정에 따라 다를 수 있음)
-					P->bUseControllerRotationYaw = true;
-				}
 
-				// [해결: 카메라 고정] 시점을 새로 빙의한 Pawn으로 강제 고정
 				PC->SetViewTarget(P);
-				// 입력 무시 상태 초기화
 				PC->ResetIgnoreLookInput();
 				PC->ResetIgnoreMoveInput();
 			};
 
-		// 나의 새로운 설정 적용 (현재 나의 bIsLowerBody는 이미 Orb에서 바뀐 상태여야 함)
-		ApplyRoleSettings(MyPC, bIsLowerBody);
-		// 파트너의 새로운 설정 적용
-		ApplyRoleSettings(PartnerPC, PartnerPS->bIsLowerBody);
+		FinalizeSettings(MyPC, bIsLowerBody);
+		FinalizeSettings(PartnerPC, PartnerPS->bIsLowerBody);
 
-		UE_LOG(LogTemp, Log, TEXT("모든 조작 권한 및 입력 컨텍스트 스왑 완료"));
+		UE_LOG(LogTemp, Log, TEXT("물리 초기화 및 스왑 설정 완료"));
 	}
 }
