@@ -2,6 +2,8 @@
 #include "BaseCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Net/UnrealNetwork.h"
 #include "BaseWeapon.h"
 
 DEFINE_LOG_CATEGORY(LogBaseChar);
@@ -35,6 +37,9 @@ ABaseCharacter::ABaseCharacter()
     DefaultWalkSpeed = 600.0f;
     CurrentTotalWeight = 0.0f;
     CurrentWeapon = nullptr; // 무기 초기화
+
+    CurrentHP = MaxHP;
+    bReplicates = true;
 }
 
 void ABaseCharacter::BeginPlay()
@@ -182,4 +187,51 @@ void ABaseCharacter::SetArmorColor(EArmorSlot Slot, FLinearColor Color)
         // 실제로는 CreateDynamicMaterialInstance가 필요할 수 있음
         TargetMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(Color));
     }
+}
+
+void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+    Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(ABaseCharacter, CurrentHP);
+}
+
+float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
+{
+    if (bIsDead) return 0.0f;
+
+    float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
+    CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
+
+    if (CurrentHP <= 0.0f) Die();
+
+    return ActualDamage;
+}
+
+void ABaseCharacter::Die()
+{
+    if (bIsDead) return;
+    bIsDead = true;
+
+    CHAR_LOG(Warning, TEXT("Character Died."));
+
+    // 충돌 및 물리 설정
+    GetCapsuleComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
+    GetMesh()->SetSimulatePhysics(true); // Ragdoll 효과
+    GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
+
+    OnDeath.Broadcast();
+}
+
+void ABaseCharacter::OnRep_CurrentHP()
+{
+    // 이 함수는 서버에서 CurrentHP 변수가 변경되어 클라이언트로 복제될 때 실행됩니다.
+    // 보통 여기에서 체력 바(UI)를 업데이트하는 로직을 넣습니다.
+
+    if (CurrentHP <= 0.0f)
+    {
+        // 사망 처리 등 클라이언트 측 가시적 효과가 필요하다면 여기서 호출 가능
+        // Die(); 
+    }
+
+    CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);
 }

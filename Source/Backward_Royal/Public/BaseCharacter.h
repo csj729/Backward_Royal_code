@@ -12,6 +12,8 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
 
 class ABaseWeapon; // 전방 선언
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathDelegate);
+
 UCLASS()
 class BACKWARD_ROYAL_API ABaseCharacter : public ACharacter
 {
@@ -22,6 +24,9 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void Die();
 
 public:
     // --- Modular Armor Components ---
@@ -51,6 +56,24 @@ public:
     float CurrentTotalWeight;
 
     TMap<EArmorSlot, float> EquippedArmorWeights;
+
+    // --- 체력 시스템 ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
+    float MaxHP = 100.0f;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", ReplicatedUsing = OnRep_CurrentHP)
+    float CurrentHP;
+
+    UFUNCTION()
+    void OnRep_CurrentHP();
+
+    // 데미지 처리 오버라이드
+    virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnDeathDelegate OnDeath;
+
+    bool bIsDead = false;
 
     // =================================================================
     // [확정] 무기 시스템 (BaseCharacter 소유)

@@ -180,42 +180,17 @@ void AUpperBodyPawn::Look(const FInputActionValue& Value)
 
 void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 {
-	// 1. 이미 공격 중이면 즉시 리턴하여 입력을 무시
-	if (bIsAttacking) return;
+	if (bIsAttacking || !ParentBodyCharacter) return;
 
-	if (!ParentBodyCharacter)
+	bIsAttacking = true;
+
+	// 1. 공격 애니메이션 재생 (주먹/무기 공용)
+	ParentBodyCharacter->TriggerUpperBodyAttack();
+
+	// 2. 공격 판정 활성화 (애니메이션 노티파이에서 호출하는 것을 권장하지만, 테스트용으로 직접 호출)
+	if (ParentBodyCharacter->AttackComponent)
 	{
-		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
-	}
-
-	if (ParentBodyCharacter)
-	{
-		UAnimInstance* AnimInst = ParentBodyCharacter->GetMesh()->GetAnimInstance();
-		if (AnimInst)
-		{
-			// 2. 공격 상태로 전환
-			bIsAttacking = true;
-
-			// 3. 몽타주 종료 델리게이트 설정
-			FOnMontageEnded EndDelegate;
-			EndDelegate.BindUObject(this, &AUpperBodyPawn::OnAttackMontageEnded);
-
-			// 4. 캐릭터에게 공격 요청 (TriggerUpperBodyAttack이 내부적으로 Montage_Play를 호출한다고 가정)
-			ParentBodyCharacter->TriggerUpperBodyAttack();
-
-			// 5. 현재 재생 중인 몽타주에 종료 델리게이트를 바인딩
-			// 캐릭터가 재생한 몽타주를 찾아서 연결합니다.
-			UAnimMontage* CurrentMontage = ParentBodyCharacter->GetCurrentMontage();
-			if (CurrentMontage)
-			{
-				AnimInst->Montage_SetEndDelegate(EndDelegate, CurrentMontage);
-			}
-			else
-			{
-				// 만약 몽타주 재생에 실패했다면 즉시 상태 복구
-				bIsAttacking = false;
-			}
-		}
+		ParentBodyCharacter->AttackComponent->SetAttackDetection(true);
 	}
 }
 
