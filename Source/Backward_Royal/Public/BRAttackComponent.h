@@ -26,6 +26,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Combat")
 	void SetAttackDetection(bool bEnabled);
 
+	UFUNCTION(Server, Reliable)
+	void ServerSetAttackDetection(bool bEnabled);
+
 	/**
 	 * 단일 함수로 모든 데미지 처리
 	 * @param DamageMod 데미지 계수 (주먹/무기 스탯 등)

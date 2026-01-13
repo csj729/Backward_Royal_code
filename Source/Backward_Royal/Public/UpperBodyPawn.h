@@ -62,6 +62,10 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
 	bool bIsAttacking;
 
+	// 클라이언트에서 서버로 공격 상태 변경을 요청하는 RPC
+	UFUNCTION(Server, Reliable)
+	void ServerRequestSetAttackDetection(bool bEnabled);
+
 private:
 	UPROPERTY()
 	class APlayerCharacter* ParentBodyCharacter;

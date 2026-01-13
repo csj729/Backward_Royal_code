@@ -9,6 +9,11 @@ DEFINE_LOG_CATEGORY_STATIC(LogBaseWeapon, Display, All);
 #define LOG_WEAPON(Verbosity, Format, ...) \
     UE_LOG(LogBaseWeapon, Verbosity, TEXT("%s - %s"), *FString(__FUNCTION__), *FString::Printf(TEXT(Format), ##__VA_ARGS__))
 
+// static 변수 초기화 (기본값 1.0)
+float ABaseWeapon::GlobalDamageMultiplier = 1.0f;
+float ABaseWeapon::GlobalImpulseMultiplier = 1.0f;
+float ABaseWeapon::GlobalAttackSpeedMultiplier = 1.0f;
+
 ABaseWeapon::ABaseWeapon()
 {
     PrimaryActorTick.bCanEverTick = false;
@@ -45,11 +50,6 @@ void ABaseWeapon::BeginPlay()
 
     // 게임 시작 시 최신 데이터 로드 및 적용
     LoadWeaponData();
-
-    if (WeaponMesh)
-    {
-        WeaponMesh->OnComponentHit.AddDynamic(this, &ABaseWeapon::OnWeaponHit);
-    }
 }
 
 // [핵심] 데이터 테이블에서 정보를 읽어와 적용하는 로직
@@ -83,6 +83,8 @@ void ABaseWeapon::LoadWeaponData()
 
 void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
 {
+    float FinalDamage = GetFinalDamage();
+
     LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Damage: %f, Mass: %f",
         *WeaponRowName.ToString(), NewStats.BaseDamage, NewStats.MassKg);
 

@@ -3,6 +3,7 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "BRAttackComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "BaseWeapon.h"
 
@@ -33,9 +34,9 @@ ABaseCharacter::ABaseCharacter()
     FootMesh->SetupAttachment(GetMesh());
     FootMesh->SetCollisionProfileName(TEXT("NoCollision"));
 
-    bEnableArmorStats = false;
+    AttackComponent = CreateDefaultSubobject<UBRAttackComponent>(TEXT("AttackComponent"));
+
     DefaultWalkSpeed = 600.0f;
-    CurrentTotalWeight = 0.0f;
     CurrentWeapon = nullptr; // 무기 초기화
 
     CurrentHP = MaxHP;
@@ -145,27 +146,6 @@ void ABaseCharacter::EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor)
     case EArmorSlot::Feet:  TargetMesh = FootMesh; break;
     default: return;
     }
-
-    if (TargetMesh)
-    {
-        TargetMesh->SetSkeletalMesh(NewArmor.ArmorMesh);
-        if (bEnableArmorStats)
-        {
-            if (EquippedArmorWeights.Contains(Slot)) CurrentTotalWeight -= EquippedArmorWeights[Slot];
-            EquippedArmorWeights.Add(Slot, NewArmor.WeightKg);
-            CurrentTotalWeight += NewArmor.WeightKg;
-            UpdateMovementSpeedBasedOnWeight();
-        }
-    }
-}
-
-void ABaseCharacter::UpdateMovementSpeedBasedOnWeight()
-{
-    if (!GetCharacterMovement()) return;
-    if (!bEnableArmorStats) { GetCharacterMovement()->MaxWalkSpeed = DefaultWalkSpeed; return; }
-
-    float WeightPenalty = CurrentTotalWeight * 5.0f;
-    GetCharacterMovement()->MaxWalkSpeed = FMath::Clamp(DefaultWalkSpeed - WeightPenalty, 150.0f, DefaultWalkSpeed);
 }
 
 void ABaseCharacter::SetArmorColor(EArmorSlot Slot, FLinearColor Color)

@@ -11,6 +11,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
 #define CHAR_LOG(Verbosity, Format, ...) UE_LOG(LogBaseChar, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
 class ABaseWeapon; // 전방 선언
+class UBRAttackComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathDelegate);
 
@@ -45,17 +46,12 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Armor")
     USkeletalMeshComponent* FootMesh;
 
-    // --- Stats ---
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GameMode")
-    bool bEnableArmorStats;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UBRAttackComponent* AttackComponent;
 
+    // --- Stats ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float DefaultWalkSpeed;
-
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats")
-    float CurrentTotalWeight;
-
-    TMap<EArmorSlot, float> EquippedArmorWeights;
 
     // --- 체력 시스템 ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
@@ -94,9 +90,6 @@ public:
     // --- Functions ---
     UFUNCTION(BlueprintCallable, Category = "Equipment")
     void EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor);
-
-    UFUNCTION(BlueprintCallable, Category = "Stats")
-    void UpdateMovementSpeedBasedOnWeight();
 
     UFUNCTION(BlueprintCallable, Category = "Customization")
     void SetArmorColor(EArmorSlot Slot, FLinearColor Color);

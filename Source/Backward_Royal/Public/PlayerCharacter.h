@@ -22,7 +22,7 @@ public:
 	// 상체(Player A)가 공격 버튼을 눌렀을 때 호출
 	// (블루프린트에서 로직을 짜기 위해 BlueprintImplementableEvent로 변경 추천)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Coop")
-	void TriggerUpperBodyAttack();	
+	UAnimMontage* TriggerUpperBodyAttack();
 
 	// 애니메이션 블루프린트에서 사용할 변수
 	UPROPERTY(BlueprintReadOnly, Category = "Coop|Animation")

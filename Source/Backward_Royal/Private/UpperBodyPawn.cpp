@@ -8,7 +8,8 @@
 #include "Kismet/GameplayStatics.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
-#include "Components/SkeletalMeshComponent.h" 
+#include "BRAttackComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUpperBodyPawn, Log, All);
@@ -178,29 +179,34 @@ void AUpperBodyPawn::Look(const FInputActionValue& Value)
 
 }
 
+void AUpperBodyPawn::ServerRequestSetAttackDetection_Implementation(bool bEnabled)
+{
+	// 여기는 이제 서버입니다. 
+	// 서버에서 안전하게 하체 캐릭터의 컴포넌트 로직을 실행합니다.
+	if (ParentBodyCharacter && ParentBodyCharacter->AttackComponent)
+	{
+		// 서버이므로 일반 SetAttackDetection 호출 (RPC 아님)
+		ParentBodyCharacter->AttackComponent->SetAttackDetection(bEnabled);
+	}
+}
+
 void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 {
 	if (bIsAttacking || !ParentBodyCharacter) return;
 
 	bIsAttacking = true;
-
-	// 1. 공격 애니메이션 재생 (주먹/무기 공용)
 	ParentBodyCharacter->TriggerUpperBodyAttack();
 
-	// 2. 공격 판정 활성화 (애니메이션 노티파이에서 호출하는 것을 권장하지만, 테스트용으로 직접 호출)
-	if (ParentBodyCharacter->AttackComponent)
-	{
-		ParentBodyCharacter->AttackComponent->SetAttackDetection(true);
-	}
+	// [수정] 컴포넌트의 RPC가 아닌, 자신의 서버 RPC 호출
+	ServerRequestSetAttackDetection(true);
 }
 
 void AUpperBodyPawn::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	// 공격 상태 해제 -> 이제 다시 공격 입력이 가능해집니다.
 	bIsAttacking = false;
 
-	// 로그로 확인
-	UE_LOG(LogTemp, Display, TEXT("Attack Montage Ended. Ready for next attack."));
+	// 종료 시에도 자신의 서버 RPC 호출
+	ServerRequestSetAttackDetection(false);
 }
 
 void AUpperBodyPawn::Interact(const FInputActionValue& Value)
