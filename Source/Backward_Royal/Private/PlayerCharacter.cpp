@@ -1,4 +1,4 @@
-#include "PlayerCharacter.h"
+ï»¿#include "PlayerCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -6,13 +6,14 @@
 #include "Components/CapsuleComponent.h"	
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "BRPlayerController.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY(LogPlayerChar);
 
 APlayerCharacter::APlayerCharacter()
 {
-	// [Á¶ÀÛ ¼³Á¤] ÅÊÅ©/¸» ¹æ½Ä (¸öÅë È¸Àü O, ÀÌµ¿ ¹æÇâ È¸Àü X)
+	// [ì¡°ì‘ ì„¤ì •] íƒ±í¬/ë§ ë°©ì‹ (ëª¸í†µ íšŒì „ O, ì´ë™ ë°©í–¥ íšŒì „ X)
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -23,12 +24,12 @@ APlayerCharacter::APlayerCharacter()
 	GetMesh()->SetOwnerNoSee(true);
 	GetMesh()->bCastHiddenShadow = true;
 
-	// 1. ÈÄ¹æ Ä«¸Ş¶ó ¼³Á¤ (Player B)
+	// 1. í›„ë°© ì¹´ë©”ë¼ ì„¤ì • (Player B)
 	RearCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("RearCameraBoom"));
 	RearCameraBoom->SetupAttachment(RootComponent);
-	RearCameraBoom->TargetArmLength = 0.0f; // 1ÀÎÄª ´À³¦
+	RearCameraBoom->TargetArmLength = 0.0f; // 1ì¸ì¹­ ëŠë‚Œ
 
-	// ¸» ¿îÀüÀÚ´Â ½ÃÁ¡ °íÁ¤ (ÄÁÆ®·Ñ·¯ È¸Àü ¾È µû¶ó°¨)
+	// ë§ ìš´ì „ìëŠ” ì‹œì  ê³ ì • (ì»¨íŠ¸ë¡¤ëŸ¬ íšŒì „ ì•ˆ ë”°ë¼ê°)
 	RearCameraBoom->bUsePawnControlRotation = false;
 	RearCameraBoom->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
 
@@ -36,17 +37,17 @@ APlayerCharacter::APlayerCharacter()
 	RearCamera->SetupAttachment(RearCameraBoom, USpringArmComponent::SocketName);
 	RearCamera->bUsePawnControlRotation = false;
 
-	// 2. »óÃ¼(Player A) ºÎÂø ÁöÁ¡ »ı¼º
+	// 2. ìƒì²´(Player A) ë¶€ì°© ì§€ì  ìƒì„±
 	HeadMountPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HeadMountPoint"));
 
-	// [¿À·ù ÇØ°áµÊ] ÀÌÁ¦ Ä¸½¶ ÄÄÆ÷³ÍÆ® Çì´õ°¡ ÀÖ¾î¼­ Á¤»óÀûÀ¸·Î ºÙ½À´Ï´Ù.
+	// [ì˜¤ë¥˜ í•´ê²°ë¨] ì´ì œ ìº¡ìŠ ì»´í¬ë„ŒíŠ¸ í—¤ë”ê°€ ìˆì–´ì„œ ì •ìƒì ìœ¼ë¡œ ë¶™ìŠµë‹ˆë‹¤.
 	HeadMountPoint->SetupAttachment(GetCapsuleComponent());
 
-	// Ä¸½¶ Áß¾Ó(¹è²Å)¿¡¼­ ´«³ôÀÌ(Z +65)¸¸Å­ À§·Î ¿Ã¸²
+	// ìº¡ìŠ ì¤‘ì•™(ë°°ê¼½)ì—ì„œ ëˆˆë†’ì´(Z +65)ë§Œí¼ ìœ„ë¡œ ì˜¬ë¦¼
 	HeadMountPoint->SetRelativeLocation(FVector(0.0f, 0.0f, 65.0f));
 
 	// =================================================================
-	// [³×Æ®¿öÅ©] ¾÷µ¥ÀÌÆ® ºóµµ Áõ°¡
+	// [ë„¤íŠ¸ì›Œí¬] ì—…ë°ì´íŠ¸ ë¹ˆë„ ì¦ê°€
 	// =================================================================
 	bReplicates = true;
 	NetUpdateFrequency = 144.0f;
@@ -71,8 +72,61 @@ void APlayerCharacter::BeginPlay()
 	}
 }
 
+void APlayerCharacter::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	// [ì„œë²„ ê¶Œí•œ] ì´ë™ ëª¨ë“œ ì´ˆê¸°í™” ë° ë¬¼ë¦¬ ìƒíƒœ í™œì„±í™”
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
+	{
+		MoveComp->SetMovementMode(MOVE_Walking);
+		MoveComp->Activate();
+	}
+}
+
+void APlayerCharacter::Restart()
+{
+	Super::Restart();
+
+	// í´ë¼ì´ì–¸íŠ¸ì—ì„œ ì»¨íŠ¸ë¡¤ëŸ¬ í• ë‹¹ì´ ì™„ë£Œëœ ì§í›„ í˜¸ì¶œë¨
+	if (IsLocallyControlled())
+	{
+		// ì…ë ¥ ì»´í¬ë„ŒíŠ¸ê°€ ìˆë‹¤ë©´ ë°”ì¸ë”© ë¡œì§ì„ ë‹¤ì‹œ ì‹¤í–‰í•˜ì—¬ í•¨ìˆ˜ ì—°ê²°
+		if (InputComponent)
+		{
+			SetupPlayerInputComponent(InputComponent);
+		}
+
+		UE_LOG(LogTemp, Warning, TEXT("ì¬ì„¤ì •"));
+	}
+}
+
+void APlayerCharacter::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+
+	// PlayerStateê°€ ë³µì œë˜ì–´ ë“¤ì–´ì™”ì„ ë•Œ (ì»¨íŠ¸ë¡¤ëŸ¬ ì†Œìœ ê¶Œ í™•ì¸ ì‹œì )
+	if (IsLocallyControlled())
+	{
+		if (InputComponent)
+		{
+			SetupPlayerInputComponent(InputComponent);
+			UE_LOG(LogTemp, Warning, TEXT("OnRep_PlayerStateë¥¼ í†µí•´ ì…ë ¥ ë°”ì¸ë”© ì¬ì„¤ì •"));
+		}
+
+		if (ABRPlayerController* PC = Cast<ABRPlayerController>(GetController()))
+		{
+			PC->SetupRoleInput(true); // í•˜ì²´ìš© IMC ê°•ì œ ë¡œë“œ
+		}
+	}
+}
+
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
+	if (!PlayerInputComponent) return;
+
+	PlayerInputComponent->ClearActionBindings();
+
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
@@ -97,7 +151,7 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
-		// W/S: ÀüÈÄ ÀÌµ¿
+		// W/S: ì „í›„ ì´ë™
 		if (MovementVector.Y != 0.0f)
 		{
 			const FRotator Rotation = Controller->GetControlRotation();
@@ -107,7 +161,7 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 			AddMovementInput(ForwardDirection, MovementVector.Y);
 		}
 
-		// A/D: Á¦ÀÚ¸® È¸Àü
+		// A/D: ì œìë¦¬ íšŒì „
 		if (MovementVector.X != 0.0f)
 		{
 			AddControllerYawInput(MovementVector.X);

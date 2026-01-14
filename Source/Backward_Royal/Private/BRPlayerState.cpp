@@ -142,77 +142,67 @@ void ABRPlayerState::SwapControlWithPartner()
 	if (!GS || !GS->PlayerArray.IsValidIndex(ConnectedPlayerIndex)) return;
 
 	ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedPlayerIndex]);
-	if (!PartnerPS) return;
-
 	ABRPlayerController* MyPC = Cast<ABRPlayerController>(GetOwner());
 	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwner());
 
 	if (MyPC && PartnerPC)
 	{
-		APawn* MyCurrentPawn = MyPC->GetPawn();
-		APawn* PartnerPawn = PartnerPC->GetPawn();
+		// 1. 현재 각자가 조종 중인 Pawn을 명확히 백업
+		APawn* MyOldPawn = MyPC->GetPawn();
+		APawn* PartnerOldPawn = PartnerPC->GetPawn();
 
-		if (MyCurrentPawn && PartnerPawn)
+		if (!MyOldPawn || !PartnerOldPawn) return;
+
+		// 2. 빙의 해제 및 교차 빙의
+		MyPC->UnPossess();
+		PartnerPC->UnPossess();
+
+		MyPC->Possess(PartnerOldPawn);
+		PartnerPC->Possess(MyOldPawn);
+
+		// 3. [핵심] 네트워크 소유권 갱신 (AutonomousProxy 권한 확정)
+		PartnerOldPawn->SetOwner(MyPC);
+		MyOldPawn->SetOwner(PartnerPC);
+
+		// 4. 상체 부착 상태 재설정
+		APlayerCharacter* LowerChar = bIsLowerBody ? Cast<APlayerCharacter>(PartnerOldPawn) : Cast<APlayerCharacter>(MyOldPawn);
+		AUpperBodyPawn* UpperPawn = bIsLowerBody ? Cast<AUpperBodyPawn>(MyOldPawn) : Cast<AUpperBodyPawn>(PartnerOldPawn);
+
+		if (UpperPawn && LowerChar)
 		{
-			// 1. 빙의 해제 및 교차 빙의
-			MyPC->UnPossess();
-			PartnerPC->UnPossess();
-
-			MyPC->Possess(PartnerPawn);
-			PartnerPC->Possess(MyCurrentPawn);
-
-			// 2. 상체 부착 상태 재설정
-			APlayerCharacter* LowerChar = nullptr;
-			AUpperBodyPawn* UpperPawn = nullptr;
-
-			if (bIsLowerBody)
-			{
-				LowerChar = Cast<APlayerCharacter>(MyCurrentPawn);
-				UpperPawn = Cast<AUpperBodyPawn>(PartnerPawn);
-			}
-			else
-			{
-				LowerChar = Cast<APlayerCharacter>(PartnerPawn);
-				UpperPawn = Cast<AUpperBodyPawn>(MyCurrentPawn);
-			}
-
-			if (UpperPawn && LowerChar)
-			{
-				FAttachmentTransformRules AttachRules(EAttachmentRule::SnapToTarget, true);
-				UpperPawn->AttachToComponent(LowerChar->HeadMountPoint, AttachRules);
-			}
-
-			// 3. [중요] 클라이언트에게 빙의가 완료되었음을 알리고 조작을 초기화함 (떨림 방지 핵심)
-			MyPC->ClientRestart(PartnerPawn);
-			PartnerPC->ClientRestart(MyCurrentPawn);
+			UpperPawn->AttachToComponent(LowerChar->HeadMountPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		}
 
-		auto ApplyRoleSettings = [](ABRPlayerController* PC, bool bIsLower)
+		// 5. [가장 중요] 클라이언트에게 입력 시스템 재시작 명령
+		// 이 함수가 호출되어야 클라이언트에서 하체의 SetupPlayerInputComponent가 다시 실행됩니다.
+		MyPC->ClientRestart(PartnerOldPawn);
+		PartnerPC->ClientRestart(MyOldPawn);
+
+		// 6. 설정 적용 람다 실행
+		auto ApplyRoleSettings = [this](ABRPlayerController* PC, bool bIsLower)
 			{
 				if (!PC) return;
-
 				PC->SetupRoleInput(bIsLower);
 
 				APawn* P = PC->GetPawn();
 				if (!P) return;
 
-				// [떨림 및 회전 해결] 컨트롤러의 회전 값을 Pawn에 동기화
-				P->bUseControllerRotationYaw = true;
+				// 시점 전환 (스크린샷 3번의 시점 고립 해결)
+				PC->SetViewTarget(P);
+
+				// 모든 입력 무시 상태 강제 해제
+				PC->ResetIgnoreMoveInput();
+				PC->SetIgnoreMoveInput(false);
+				PC->ResetIgnoreLookInput();
+				PC->SetIgnoreLookInput(false);
 
 				if (bIsLower)
 				{
 					if (ACharacter* Character = Cast<ACharacter>(P))
 					{
-						// 하체 캐릭터의 이동 모드를 걷기로 강제 설정 (떨림 방지)
-						Character->GetCharacterMovement()->SetMovementMode(EMovementMode::MOVE_Walking);
-						Character->GetCharacterMovement()->bOrientRotationToMovement = false; // 컨트롤러 방향을 따르도록
+						Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 					}
 				}
-
-				// 시점 및 입력 초기화
-				PC->SetViewTarget(P);
-				PC->ResetIgnoreLookInput();
-				PC->ResetIgnoreMoveInput();
 			};
 
 		ApplyRoleSettings(MyPC, bIsLowerBody);

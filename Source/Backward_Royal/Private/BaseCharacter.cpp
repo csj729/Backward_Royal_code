@@ -4,6 +4,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "BRAttackComponent.h"
+#include "UpperBodyPawn.h"
 #include "Net/UnrealNetwork.h"
 #include "BaseWeapon.h"
 
@@ -214,4 +215,25 @@ void ABaseCharacter::OnRep_CurrentHP()
     }
 
     CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);
+}
+
+void ABaseCharacter::MulticastPlayAttack_Implementation(APawn* RequestingPawn)
+{
+    if (AttackMontage && GetMesh())
+    {
+        UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+        if (AnimInstance)
+        {
+            AnimInstance->Montage_Play(AttackMontage);
+
+            // 전달받은 Pawn을 UpperBodyPawn으로 캐스팅
+            if (AUpperBodyPawn* UpperPawn = Cast<AUpperBodyPawn>(RequestingPawn))
+            {
+                FOnMontageEnded EndDelegate;
+              
+                EndDelegate.BindUObject(UpperPawn, &AUpperBodyPawn::OnAttackMontageEnded);
+                AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
+            }
+        }
+    }
 }

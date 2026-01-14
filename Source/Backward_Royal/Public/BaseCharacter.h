@@ -63,6 +63,14 @@ public:
     UFUNCTION()
     void OnRep_CurrentHP();
 
+    // 에디터에서 공격 애니메이션을 할당하는 변수
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UAnimMontage* AttackMontage;
+
+    // 멀티캐스트 함수에 상체 Pawn 정보를 넘겨서 클라이언트 변수를 풀 수 있게 합니다.
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastPlayAttack(APawn* RequestingPawn);
+
     // 데미지 처리 오버라이드
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 

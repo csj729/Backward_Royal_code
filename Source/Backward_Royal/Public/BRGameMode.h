@@ -37,5 +37,9 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+	// 에디터(BP_BRGameMode)에서 BP_UpperBodyPawn을 할당할 변수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Classes")
+	TSubclassOf<class AUpperBodyPawn> UpperBodyClass;
 };
 

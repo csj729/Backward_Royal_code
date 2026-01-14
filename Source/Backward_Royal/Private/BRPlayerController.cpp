@@ -732,19 +732,27 @@ void ABRPlayerController::ShowRoomInfo()
 
 void ABRPlayerController::SetupRoleInput(bool bIsLower)
 {
-	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
-		{
-			// 기존 매핑 제거
-			Subsystem->ClearAllMappings();
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	if (!LocalPlayer) return;
 
-			// 새로운 역할에 맞는 매핑 추가
-			UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
-			if (TargetContext)
-			{
-				Subsystem->AddMappingContext(TargetContext, 0);
-			}
+	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+	{
+		Subsystem->ClearAllMappings();
+
+		UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
+		if (TargetContext)
+		{
+			Subsystem->AddMappingContext(TargetContext, 0);
+		}
+	}
+
+	// [추가] 하체 캐릭터라면 입력 바인딩(함수 연결)을 강제로 다시 시키기
+	if (bIsLower)
+	{
+		if (APawn* P = GetPawn())
+		{
+			// 클라이언트에게 입력 시스템 재시작 명령
+			ClientRestart(P);
 		}
 	}
 }

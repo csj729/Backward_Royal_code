@@ -29,8 +29,7 @@ protected:
 	void Attack(const FInputActionValue& Value);
 	void Interact(const FInputActionValue& Value);
 
-	UFUNCTION()
-	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+	virtual void OnRep_PlayerState() override;
 
 public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
@@ -66,10 +65,12 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestSetAttackDetection(bool bEnabled);
 
-private:
+	UFUNCTION()
+	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
+
 	UPROPERTY()
 	class APlayerCharacter* ParentBodyCharacter;
-
+private:
 	// [추가] 지난 프레임의 몸통 각도를 저장할 변수
 	float LastBodyYaw;
 };
