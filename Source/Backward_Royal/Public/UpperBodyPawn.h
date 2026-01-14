@@ -65,6 +65,9 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestSetAttackDetection(bool bEnabled);
 
+	UFUNCTION(Server, Reliable)
+	void ServerRequestInteract(AActor* TargetActor);
+
 	UFUNCTION()
 	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 

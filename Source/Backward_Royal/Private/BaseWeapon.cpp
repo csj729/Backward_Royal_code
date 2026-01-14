@@ -16,7 +16,7 @@ float ABaseWeapon::GlobalAttackSpeedMultiplier = 1.0f;
 
 ABaseWeapon::ABaseWeapon()
 {
-    PrimaryActorTick.bCanEverTick = false;
+    PrimaryActorTick.bCanEverTick = false;  
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
     RootComponent = WeaponMesh;
 
@@ -35,6 +35,11 @@ ABaseWeapon::ABaseWeapon()
     DamageCoefficient = 1.0f;
     ImpulseCoefficient = 1.0f;
     AttackSpeedCoefficient = 1.0f;
+
+    bReplicates = true;
+    AActor::SetReplicateMovement(true);
+
+    WeaponMesh->SetIsReplicated(true);
 }
 
 // 에디터에서 수치(RowName 등) 변경 시 즉시 반영

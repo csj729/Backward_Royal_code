@@ -280,14 +280,6 @@ void AUpperBodyPawn::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupt
 
 void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 {
-	// =================================================================
-	// [테스트 1] 입력 확인용 메시지 출력
-	// =================================================================
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Green, TEXT("E Key Pressed!"));
-	}
-
 	// 1. 부모(몸통) 캐릭터 확인
 	if (!ParentBodyCharacter)
 	{
@@ -348,19 +340,31 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 		AActor* HitActor = HitResult.GetActor();
 
 		// 이를 통해 무기(BaseWeapon)와 아이템(DropItem) 모두 상호작용 가능해짐
-		if (IInteractableInterface* Interface = Cast<IInteractableInterface>(HitActor))
+		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
 		{
-			// 화면에 감지된 대상 이름 출력
+			// [수정됨] 직접 호출 대신 서버에 상호작용 요청 (소유권 문제 해결)
+			ServerRequestInteract(HitActor);
+
 			if (GEngine)
 			{
-				FString Msg = FString::Printf(TEXT("Interactable Detected: %s"), *HitActor->GetName());
-				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan, Msg);
+				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+					FString::Printf(TEXT("Requesting Server Interact: %s"), *HitActor->GetName()));
 			}
+			BODY_LOG(Log, TEXT("Server interaction requested for %s"), *HitActor->GetName());
+		}
+	}
+}
 
-			BODY_LOG(Log, TEXT("Interacting with %s"), *HitActor->GetName());
-
-			// 인터페이스 함수 호출 (무기 장착 or 아이템 획득)
+void AUpperBodyPawn::ServerRequestInteract_Implementation(AActor* TargetActor)
+{
+	if (TargetActor && ParentBodyCharacter)
+	{
+		// 2. 서버 월드에서 인터페이스 실행
+		// 서버는 모든 권한을 가지고 있으므로 무기 장착이든 아이템 획득이든 즉시 성공합니다.
+		if (IInteractableInterface* Interface = Cast<IInteractableInterface>(TargetActor))
+		{
 			Interface->Interact(ParentBodyCharacter);
+			BODY_LOG(Log, TEXT("Server: %s가 %s와 상호작용 수행 완료"), *ParentBodyCharacter->GetName(), *TargetActor->GetName());
 		}
 	}
 }

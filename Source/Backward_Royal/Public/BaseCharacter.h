@@ -84,7 +84,7 @@ public:
     // =================================================================
 
     // 현재 장착 중인 무기
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", Replicated)
     ABaseWeapon* CurrentWeapon;
 
     // 무기 장착 (무기 액터를 받아 처리)

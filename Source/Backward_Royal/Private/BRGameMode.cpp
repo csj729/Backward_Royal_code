@@ -71,6 +71,11 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 			// [하체]
 			BRPS->SetPlayerRole(true, -1);
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 하체 역할 할당"), *PlayerName);
+
+			if (APawn* NewPawn = NewPlayer->GetPawn())
+			{
+				NewPawn->SetOwner(NewPlayer); // RPC 권한 부여
+			}
 		}
 		else
 		{
@@ -143,6 +148,7 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 		BRGameState->UpdatePlayerList();
 	}
 }
+
 void ABRGameMode::Logout(AController* Exiting)
 {
 	// 방장이 나갔을 경우 새로운 방장 지정 및 역할 재할당
