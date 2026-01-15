@@ -151,21 +151,25 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
-		// W/S: 전후 이동
-		if (MovementVector.Y != 0.0f)
-		{
-			const FRotator Rotation = Controller->GetControlRotation();
-			const FRotator YawRotation(0, Rotation.Yaw, 0);
-			const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+		// 1. 컨트롤러의 회전값 중 Yaw(수평 회전)만 가져옵니다.
+		const FRotator Rotation = Controller->GetControlRotation();
+		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-			AddMovementInput(ForwardDirection, MovementVector.Y);
-		}
+		// 2. 전방(Forward) 벡터 구하기 (W/S 이동용)
+		// EAxis::X 는 앞쪽 방향을 의미합니다.
+		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
 
-		// A/D: 제자리 회전
-		if (MovementVector.X != 0.0f)
-		{
-			AddControllerYawInput(MovementVector.X);
-		}
+		// 3. 우측(Right) 벡터 구하기 (A/D 이동용) [새로 추가된 부분]
+		// EAxis::Y 는 오른쪽 방향을 의미합니다.
+		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+		// 4. 입력값 적용
+		// W/S 입력(MovementVector.Y)은 앞뒤 벡터에 적용
+		AddMovementInput(ForwardDirection, MovementVector.Y);
+
+		// A/D 입력(MovementVector.X)은 좌우 벡터에 적용
+		// 기존의 AddControllerYawInput(회전) 대신 AddMovementInput(이동)을 사용합니다.
+		AddMovementInput(RightDirection, MovementVector.X);
 	}
 }
 
