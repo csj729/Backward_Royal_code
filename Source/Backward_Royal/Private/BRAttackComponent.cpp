@@ -62,12 +62,11 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
 
 void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
 {
-	// 1. 물리적 충돌 발생 여부 확인 (권한 상관없이 무조건 출력)
-	FString NetMode = GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client");
-	GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::White, FString::Printf(TEXT("[%s] Physics Hit: %s"), *NetMode, *OtherActor->GetName()));
-
 	// 1. 기본 조건 체크 (공통)
 	if (!bIsDetectionActive || !OtherActor || OtherActor == GetOwner()) return;
+
+	FString NetMode = GetOwner()->HasAuthority() ? TEXT("Server") : TEXT("Client");
+	GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::White, FString::Printf(TEXT("[%s] Physics Hit: %s"), *NetMode, *OtherActor->GetName()));
 
 	// 2. 캐릭터 참조 가져오기
 	ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());

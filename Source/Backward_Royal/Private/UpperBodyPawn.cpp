@@ -90,7 +90,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 1. 부모(몸통) 찾기 및 초기화
+	// 1. 부모 몸통 찾기
 	if (!ParentBodyCharacter)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
@@ -100,12 +100,11 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 			float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
 			FRotator NewRotation = Controller->GetControlRotation();
 
-			// [복구] 카메라 초기 위치는 엉덩이(등) 쪽이어야 하므로 180도 유지가 맞습니다.
+			// [초기화] 등 뒤(180도)를 바라보도록 설정
 			NewRotation.Yaw = CurrentBodyYaw + 180.0f;
 
 			Controller->SetControlRotation(NewRotation);
 			LastBodyYaw = CurrentBodyYaw;
-			return;
 		}
 	}
 
@@ -151,18 +150,18 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	}
 
 	// =================================================================
-	// [진짜 해결책] 상체 시선 전달 (머리 방향 교정)
-	// =================================================================
 	if (ParentBodyCharacter)
 	{
-		// 문제 원인: 카메라는 180도(등 뒤)를 보고 있는데, 그 값을 그대로 머리에 주니까
-		// 머리도 180도 뒤를 봐서 "엑소시스트"가 되는 것입니다.
-
 		// 해결: 머리(애니메이션)에 전달할 때만 180도를 다시 뒤집어서 "앞"을 보게 만듭니다.
 		FRotator TargetHeadRot = Controller->GetControlRotation();
 		TargetHeadRot.Yaw += 180.0f;
 
 		ParentBodyCharacter->SetUpperBodyRotation(TargetHeadRot);
+
+		if (IsLocallyControlled() && !HasAuthority())
+		{
+			ServerUpdateAimRotation(TargetHeadRot);
+		}
 	}
 }
 
@@ -365,6 +364,35 @@ void AUpperBodyPawn::ServerRequestInteract_Implementation(AActor* TargetActor)
 		{
 			Interface->Interact(ParentBodyCharacter);
 			BODY_LOG(Log, TEXT("Server: %s가 %s와 상호작용 수행 완료"), *ParentBodyCharacter->GetName(), *TargetActor->GetName());
+		}
+	}
+}
+
+void AUpperBodyPawn::ServerUpdateAimRotation_Implementation(FRotator NewRotation)
+{
+	// 1. 함수가 호출되었는지 확인
+	// GEngine->AddOnScreenDebugMessage(KEY, TIME, COLOR, MESSAGE);
+	GEngine->AddOnScreenDebugMessage(501, 1.f, FColor::Yellow, TEXT("[Server] RPC Received!"));
+
+	if (ParentBodyCharacter)
+	{
+		// 2. 부모가 있어서 업데이트 성공
+		ParentBodyCharacter->SetUpperBodyRotation(NewRotation);
+
+		FString Msg = FString::Printf(TEXT("[Server] Update Success! Angle: %f"), NewRotation.Yaw);
+		GEngine->AddOnScreenDebugMessage(502, 1.f, FColor::Green, Msg);
+	}
+	else
+	{
+		// 3. [문제 발생] 부모를 못 찾음 -> 여기서 막히고 있을 확률 99%
+		GEngine->AddOnScreenDebugMessage(502, 1.f, FColor::Red, TEXT("[Server] ERROR: ParentBodyCharacter is NULL!"));
+
+		// 강제로 다시 찾기 시도
+		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
+		if (ParentBodyCharacter)
+		{
+			ParentBodyCharacter->SetUpperBodyRotation(NewRotation);
+			GEngine->AddOnScreenDebugMessage(503, 1.f, FColor::Cyan, TEXT("[Server] Recovered & Updated!"));
 		}
 	}
 }

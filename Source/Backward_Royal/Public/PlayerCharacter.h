@@ -20,7 +20,7 @@ public:
 	void SetUpperBodyRotation(FRotator NewRotation);
 
 	// 애니메이션 블루프린트에서 사용할 변수
-	UPROPERTY(BlueprintReadOnly, Category = "Coop|Animation")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop|Animation", Replicated)
 	FRotator UpperBodyAimRotation;
 
 	// 상체 Pawn을 저장하고 관리하기 위한 함수 및 변수
@@ -33,6 +33,8 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void Tick(float DeltaTime) override;
 
 	// 이동 (Player B 전용)
 	void Move(const FInputActionValue& Value);

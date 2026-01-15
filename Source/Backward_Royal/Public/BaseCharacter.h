@@ -29,6 +29,9 @@ protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void Die();
 
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastDie();
+
 public:
     // --- Modular Armor Components ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Armor")

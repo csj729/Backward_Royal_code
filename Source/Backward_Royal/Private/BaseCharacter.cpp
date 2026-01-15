@@ -1,4 +1,4 @@
-// BaseCharacter.cpp
+ï»¿// BaseCharacter.cpp
 #include "BaseCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -6,6 +6,7 @@
 #include "BRAttackComponent.h"
 #include "UpperBodyPawn.h"
 #include "Net/UnrealNetwork.h"
+#include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "BaseWeapon.h"
 
 DEFINE_LOG_CATEGORY(LogBaseChar);
@@ -14,7 +15,7 @@ ABaseCharacter::ABaseCharacter()
 {
     PrimaryActorTick.bCanEverTick = true;
 
-    // ¾Æ¸Ó ¸Ş½¬ ÃÊ±âÈ­
+    // ì•„ë¨¸ ë©”ì‰¬ ì´ˆê¸°í™”
     HeadMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("HeadMesh"));
     HeadMesh->SetupAttachment(GetMesh());
     HeadMesh->SetCollisionProfileName(TEXT("NoCollision"));
@@ -38,7 +39,7 @@ ABaseCharacter::ABaseCharacter()
     AttackComponent = CreateDefaultSubobject<UBRAttackComponent>(TEXT("AttackComponent"));
 
     DefaultWalkSpeed = 600.0f;
-    CurrentWeapon = nullptr; // ¹«±â ÃÊ±âÈ­
+    CurrentWeapon = nullptr; // ë¬´ê¸° ì´ˆê¸°í™”
 
     CurrentHP = MaxHP;
     bReplicates = true;
@@ -48,7 +49,7 @@ void ABaseCharacter::BeginPlay()
 {
     Super::BeginPlay();
 
-    // Leader Pose ¼³Á¤
+    // Leader Pose ì„¤ì •
     HeadMesh->SetLeaderPoseComponent(GetMesh());
     ChestMesh->SetLeaderPoseComponent(GetMesh());
     HandMesh->SetLeaderPoseComponent(GetMesh());
@@ -67,7 +68,7 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 
     if (!HasAuthority()) return;
 
-    // ±âÁ¸ ¹«±â Á¦°Å
+    // ê¸°ì¡´ ë¬´ê¸° ì œê±°
     if (CurrentWeapon)
     {
         DropCurrentWeapon();
@@ -78,11 +79,11 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
     CurrentWeapon->OnEquipped();
 
     // -------------------------------------------------------
-    // [ÀåÂø ·ÎÁ÷] ¹«±â(Grip) <-> Ä³¸¯ÅÍ(RightHandSocket) ÀÏÄ¡½ÃÅ°±â
+    // [ì¥ì°© ë¡œì§] ë¬´ê¸°(Grip) <-> ìºë¦­í„°(RightHandSocket) ì¼ì¹˜ì‹œí‚¤ê¸°
     // -------------------------------------------------------
     FName CharacterSocketName = TEXT("RightHandSocket");
 
-    // ¹«±â ¼ÒÄÏ ÀÌ¸§ (¹«±â BP¿¡¼­ ¼³Á¤ °¡´É, ±âº»°ª "Grip")
+    // ë¬´ê¸° ì†Œì¼“ ì´ë¦„ (ë¬´ê¸° BPì—ì„œ ì„¤ì • ê°€ëŠ¥, ê¸°ë³¸ê°’ "Grip")
     FName WeaponGripSocketName = NewWeapon->GripSocketName;
     if (WeaponGripSocketName.IsNone())
     {
@@ -91,26 +92,26 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 
     USkeletalMeshComponent* AttachTarget = GetMesh();
 
-    // 1. ÀÏ´Ü Ä³¸¯ÅÍÀÇ ¼Õ ¼ÒÄÏ¿¡ ¹«±â¸¦ ºÎÂø (ÀÌ ½ÃÁ¡¿£ ¹«±âÀÇ ¿øÁ¡ÀÌ ¼Õ¿¡ ºÙÀ½)
+    // 1. ì¼ë‹¨ ìºë¦­í„°ì˜ ì† ì†Œì¼“ì— ë¬´ê¸°ë¥¼ ë¶€ì°© (ì´ ì‹œì ì—” ë¬´ê¸°ì˜ ì›ì ì´ ì†ì— ë¶™ìŒ)
     if (AttachTarget->DoesSocketExist(CharacterSocketName))
     {
         CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, CharacterSocketName);
     }
     else
     {
-        // ¼ÒÄÏÀÌ ¾øÀ¸¸é ¾ÈÀüÇÏ°Ô hand_r¿¡ ºÎÂø
+        // ì†Œì¼“ì´ ì—†ìœ¼ë©´ ì•ˆì „í•˜ê²Œ hand_rì— ë¶€ì°©
         CurrentWeapon->AttachToComponent(AttachTarget, FAttachmentTransformRules::SnapToTargetNotIncludingScale, TEXT("hand_r"));
         CHAR_LOG(Warning, TEXT("Socket '%s' missing. Attached to 'hand_r'."), *CharacterSocketName.ToString());
     }
 
-    // 2. ¹«±â ¸Ş½¬¿¡ 'Grip' ¼ÒÄÏÀÌ ÀÖ´Ù¸é À§Ä¡ º¸Á¤ ¼öÇà
+    // 2. ë¬´ê¸° ë©”ì‰¬ì— 'Grip' ì†Œì¼“ì´ ìˆë‹¤ë©´ ìœ„ì¹˜ ë³´ì • ìˆ˜í–‰
     if (CurrentWeapon->WeaponMesh && CurrentWeapon->WeaponMesh->DoesSocketExist(WeaponGripSocketName))
     {
-        // (1) ¹«±â ¿øÁ¡ ±âÁØ, Grip ¼ÒÄÏÀÇ »ó´ë À§Ä¡(Transform)¸¦ °¡Á®¿È
+        // (1) ë¬´ê¸° ì›ì  ê¸°ì¤€, Grip ì†Œì¼“ì˜ ìƒëŒ€ ìœ„ì¹˜(Transform)ë¥¼ ê°€ì ¸ì˜´
         FTransform GripTransform = CurrentWeapon->WeaponMesh->GetSocketTransform(WeaponGripSocketName, RTS_Component);
 
-        // (2) ±× À§Ä¡ÀÇ ¿ª(Inverse)À» ¹«±âÀÇ »ó´ë TransformÀ¸·Î ¼³Á¤
-        // ¿ø¸®: GripÀÌ (10,0,0)¿¡ ÀÖ´Ù¸é ¹«±â¸¦ (-10,0,0)À¸·Î ¿Å°Ü¾ß GripÀÌ (0,0,0)ÀÎ ¼Õ À§Ä¡¿¡ ¿À°Ô µÊ
+        // (2) ê·¸ ìœ„ì¹˜ì˜ ì—­(Inverse)ì„ ë¬´ê¸°ì˜ ìƒëŒ€ Transformìœ¼ë¡œ ì„¤ì •
+        // ì›ë¦¬: Gripì´ (10,0,0)ì— ìˆë‹¤ë©´ ë¬´ê¸°ë¥¼ (-10,0,0)ìœ¼ë¡œ ì˜®ê²¨ì•¼ Gripì´ (0,0,0)ì¸ ì† ìœ„ì¹˜ì— ì˜¤ê²Œ ë¨
         CurrentWeapon->SetActorRelativeTransform(GripTransform.Inverse());
 
         CHAR_LOG(Log, TEXT("Adjusted weapon position using socket '%s'"), *WeaponGripSocketName.ToString());
@@ -123,17 +124,17 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
     CHAR_LOG(Log, TEXT("Equipped Weapon: %s"), *NewWeapon->GetName());
 }
 
-// [½Å±Ô] ¹«±â ¹ö¸®±â ±¸Çö
+// [ì‹ ê·œ] ë¬´ê¸° ë²„ë¦¬ê¸° êµ¬í˜„
 void ABaseCharacter::DropCurrentWeapon()
 {
     if (!CurrentWeapon) return;
 
     CHAR_LOG(Log, TEXT("Dropping Weapon: %s"), *CurrentWeapon->GetName());
 
-    // ¹«±â¿¡°Ô µå¶ø ½ÅÈ£ (¹°¸® ÄÑ±â, ºĞ¸®)
+    // ë¬´ê¸°ì—ê²Œ ë“œë ì‹ í˜¸ (ë¬¼ë¦¬ ì¼œê¸°, ë¶„ë¦¬)
     CurrentWeapon->OnDropped();
 
-    // ÂüÁ¶ ÇØÁ¦
+    // ì°¸ì¡° í•´ì œ
     CurrentWeapon = nullptr;
 }
 
@@ -166,8 +167,8 @@ void ABaseCharacter::SetArmorColor(EArmorSlot Slot, FLinearColor Color)
 
     if (TargetMesh)
     {
-        // Ã¹ ¹øÂ° ¸ÓÆ¼¸®¾ó ÀÎµ¦½º(0)ÀÇ »ö»óÀ» ¹Ù²Û´Ù°í °¡Á¤
-        // ½ÇÁ¦·Î´Â CreateDynamicMaterialInstance°¡ ÇÊ¿äÇÒ ¼ö ÀÖÀ½
+        // ì²« ë²ˆì§¸ ë¨¸í‹°ë¦¬ì–¼ ì¸ë±ìŠ¤(0)ì˜ ìƒ‰ìƒì„ ë°”ê¾¼ë‹¤ê³  ê°€ì •
+        // ì‹¤ì œë¡œëŠ” CreateDynamicMaterialInstanceê°€ í•„ìš”í•  ìˆ˜ ìˆìŒ
         TargetMesh->SetVectorParameterValueOnMaterials(TEXT("Color"), FVector(Color));
     }
 }
@@ -193,31 +194,69 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
 
 void ABaseCharacter::Die()
 {
+    // ì´ë¯¸ ì£½ì—ˆìœ¼ë©´ ë¬´ì‹œ (ì„œë²„ ê¸°ì¤€)
+    if (bIsDead) return;
+
+    MulticastDie();
+}
+
+void ABaseCharacter::MulticastDie_Implementation()
+{
+    // ì¤‘ë³µ ì‹¤í–‰ ë°©ì§€
     if (bIsDead) return;
     bIsDead = true;
 
-    CHAR_LOG(Warning, TEXT("Character Died."));
+    CHAR_LOG(Warning, TEXT("Character Died (Multicast)."));
 
-    // Ãæµ¹ ¹× ¹°¸® ¼³Á¤
-    GetCapsuleComponent()->SetCollisionResponseToAllChannels(ECR_Ignore);
-    GetMesh()->SetSimulatePhysics(true); // Ragdoll È¿°ú
-    GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
+    // 1. ìº¡ìŠ ì¶©ëŒ ë„ê¸° (ì‹œì²´ë¼ë¦¬ ê¸¸ë§‰ ë°©ì§€)
+    GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
+    // 2. [ì¤‘ìš”] ì´ë™ ì»´í¬ë„ŒíŠ¸ ë¹„í™œì„±í™”
+    // ì´ê±¸ ì•ˆ ë„ë©´ "ë¬¼ë¦¬ ì—”ì§„" vs "ì´ë™ ì»´í¬ë„ŒíŠ¸"ê°€ ì‹¸ì›Œì„œ ìºë¦­í„°ê°€ ë¶€ë“¤ê±°ë¦¬ê±°ë‚˜ ì´ìƒí•˜ê²Œ ë‚ ì•„ê°‘ë‹ˆë‹¤.
+    if (GetCharacterMovement())
+    {
+        GetCharacterMovement()->StopMovementImmediately();
+        GetCharacterMovement()->DisableMovement();
+        GetCharacterMovement()->SetComponentTickEnabled(false);
+    }
+
+    UPhysicalAnimationComponent* PhysAnimComp = FindComponentByClass<UPhysicalAnimationComponent>();
+    if (PhysAnimComp)
+    {
+        // 1. ë©”ì‰¬ì™€ì˜ ì—°ê²°ì„ ëŠê±°ë‚˜
+        PhysAnimComp->SetSkeletalMeshComponent(nullptr);
+
+        //// 2. ì•„ì˜ˆ ì»´í¬ë„ŒíŠ¸ë¥¼ êº¼ë²„ë¦½ë‹ˆë‹¤.
+        //PhysAnimComp->Deactivate();
+
+        CHAR_LOG(Log, TEXT("Physical Animation Disabled for Ragdoll."));
+    }
+
+    // 3. ë©”ì‰¬ ë¬¼ë¦¬ ì‹œë®¬ë ˆì´ì…˜ (Ragdoll) ì„¤ì • ìˆ˜ì •
+    if (GetMesh())
+    {
+        // ì¶©ëŒ í”„ë¡œí•„ê³¼ í™œì„±í™” ì„¤ì •
+        GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
+        GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+        GetMesh()->SetSimulatePhysics(true);
+    }
+
+    // 4. ì‚¬ë§ ì´ë²¤íŠ¸ ì „íŒŒ
     OnDeath.Broadcast();
 }
 
 void ABaseCharacter::OnRep_CurrentHP()
 {
-    // ÀÌ ÇÔ¼ö´Â ¼­¹ö¿¡¼­ CurrentHP º¯¼ö°¡ º¯°æµÇ¾î Å¬¶óÀÌ¾ğÆ®·Î º¹Á¦µÉ ¶§ ½ÇÇàµË´Ï´Ù.
-    // º¸Åë ¿©±â¿¡¼­ Ã¼·Â ¹Ù(UI)¸¦ ¾÷µ¥ÀÌÆ®ÇÏ´Â ·ÎÁ÷À» ³Ö½À´Ï´Ù.
+    // ì´ í•¨ìˆ˜ëŠ” ì„œë²„ì—ì„œ CurrentHP ë³€ìˆ˜ê°€ ë³€ê²½ë˜ì–´ í´ë¼ì´ì–¸íŠ¸ë¡œ ë³µì œë  ë•Œ ì‹¤í–‰ë©ë‹ˆë‹¤.
+    // ë³´í†µ ì—¬ê¸°ì—ì„œ ì²´ë ¥ ë°”(UI)ë¥¼ ì—…ë°ì´íŠ¸í•˜ëŠ” ë¡œì§ì„ ë„£ìŠµë‹ˆë‹¤.
 
     if (CurrentHP <= 0.0f)
     {
-        // »ç¸Á Ã³¸® µî Å¬¶óÀÌ¾ğÆ® Ãø °¡½ÃÀû È¿°ú°¡ ÇÊ¿äÇÏ´Ù¸é ¿©±â¼­ È£Ãâ °¡´É
+        // ì‚¬ë§ ì²˜ë¦¬ ë“± í´ë¼ì´ì–¸íŠ¸ ì¸¡ ê°€ì‹œì  íš¨ê³¼ê°€ í•„ìš”í•˜ë‹¤ë©´ ì—¬ê¸°ì„œ í˜¸ì¶œ ê°€ëŠ¥
         // Die(); 
     }
 
-    CHAR_LOG(Log, TEXT("HP°¡ º¹Á¦µÇ¾ú½À´Ï´Ù. ÇöÀç HP: %.1f"), CurrentHP);
+    CHAR_LOG(Log, TEXT("HPê°€ ë³µì œë˜ì—ˆìŠµë‹ˆë‹¤. í˜„ì¬ HP: %.1f"), CurrentHP);
 }
 
 void ABaseCharacter::MulticastPlayAttack_Implementation(APawn* RequestingPawn)
@@ -229,7 +268,7 @@ void ABaseCharacter::MulticastPlayAttack_Implementation(APawn* RequestingPawn)
         {
             AnimInstance->Montage_Play(AttackMontage);
 
-            // Àü´Ş¹ŞÀº PawnÀ» UpperBodyPawnÀ¸·Î Ä³½ºÆÃ
+            // ì „ë‹¬ë°›ì€ Pawnì„ UpperBodyPawnìœ¼ë¡œ ìºìŠ¤íŒ…
             if (AUpperBodyPawn* UpperPawn = Cast<AUpperBodyPawn>(RequestingPawn))
             {
                 FOnMontageEnded EndDelegate;

@@ -7,6 +7,7 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "BRPlayerController.h"
+#include "Net/UnrealNetwork.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY(LogPlayerChar);
@@ -81,6 +82,31 @@ void APlayerCharacter::PossessedBy(AController* NewController)
 	{
 		MoveComp->SetMovementMode(MOVE_Walking);
 		MoveComp->Activate();
+	}
+}
+
+void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME_CONDITION(APlayerCharacter, UpperBodyAimRotation, COND_SkipOwner);
+}
+
+void APlayerCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// 서버(Authority)일 때만 로그 출력
+	if (HasAuthority())
+	{
+		// 현재 서버가 알고 있는 회전값
+		FString DebugMsg = FString::Printf(TEXT("[Server] AimRot: %s"), *UpperBodyAimRotation.ToString());
+
+		// 캐릭터 머리 위에 글씨 띄우기 (Red color)
+		DrawDebugString(GetWorld(), GetActorLocation() + FVector(0, 0, 100), DebugMsg, nullptr, FColor::Red, 0.0f);
+
+		// 화면 좌측 상단에도 띄우기
+		GEngine->AddOnScreenDebugMessage(123, 0.0f, FColor::Red, DebugMsg);
 	}
 }
 

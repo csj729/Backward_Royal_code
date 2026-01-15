@@ -73,6 +73,9 @@ public:
 
 	UPROPERTY()
 	class APlayerCharacter* ParentBodyCharacter;
+
+	UFUNCTION(Server, Unreliable) // 자주 호출되므로 Unreliable 권장
+	void ServerUpdateAimRotation(FRotator NewRotation);
 private:
 	// [추가] 지난 프레임의 몸통 각도를 저장할 변수
 	float LastBodyYaw;
