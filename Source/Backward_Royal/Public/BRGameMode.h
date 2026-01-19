@@ -23,7 +23,7 @@ public:
 
 	// 게임 시작 맵 경로
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings")
-	FString GameMapPath = TEXT("/Game/Main/Level/Map_Test1");
+	FString GameMapPath = TEXT("/Game/Main/Level/Stage/Stage01_Temple");
 
 	// 게임 시작
 	UFUNCTION(BlueprintCallable, Category = "Game")

@@ -63,27 +63,27 @@ void AUpperBodyPawn::BeginPlay()
 		}
 	}
 
-	if (GEngine)
-	{
-		// 1. 현재 네트워크 상태 확인
-		FString NetRole = TEXT("None");
-		switch (GetLocalRole())
-		{
-		case ROLE_Authority: NetRole = TEXT("Authority (Server)"); break;
-		case ROLE_AutonomousProxy: NetRole = TEXT("AutonomousProxy (Client)"); break;
-		case ROLE_SimulatedProxy: NetRole = TEXT("SimulatedProxy (Other)"); break;
-		}
+	//if (GEngine)
+	//{
+	//	// 1. 현재 네트워크 상태 확인
+	//	FString NetRole = TEXT("None");
+	//	switch (GetLocalRole())
+	//	{
+	//	case ROLE_Authority: NetRole = TEXT("Authority (Server)"); break;
+	//	case ROLE_AutonomousProxy: NetRole = TEXT("AutonomousProxy (Client)"); break;
+	//	case ROLE_SimulatedProxy: NetRole = TEXT("SimulatedProxy (Other)"); break;
+	//	}
 
-		// 2. 소유자 및 컨트롤러 확인 (이제 안전함)
-		FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("No Owner");
-		FString ControllerName = GetController() ? GetController()->GetName() : TEXT("No Controller");
+	//	// 2. 소유자 및 컨트롤러 확인 (이제 안전함)
+	//	FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("No Owner");
+	//	FString ControllerName = GetController() ? GetController()->GetName() : TEXT("No Controller");
 
-		// 3. 화면 출력
-		FString DebugMsg = FString::Printf(TEXT("[%s] Pawn: %s | Owner: %s | Controller: %s"),
-			*NetRole, *GetName(), *OwnerName, *ControllerName);
+	//	// 3. 화면 출력
+	//	FString DebugMsg = FString::Printf(TEXT("[%s] Pawn: %s | Owner: %s | Controller: %s"),
+	//		*NetRole, *GetName(), *OwnerName, *ControllerName);
 
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, DebugMsg);
-	}
+	//	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, DebugMsg);
+	//}
 }
 
 void AUpperBodyPawn::Tick(float DeltaTime)
@@ -111,6 +111,8 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	if (!ParentBodyCharacter || !Controller) return;
 
 	// 2. 몸통 회전 동기화 (탱크가 회전하면 상체 카메라도 같이 회전)
+	// [수정] 하체가 회전해도 상체 카메라는 고정되어야(상하체 분리) 하므로 동기화 코드를 주석 처리합니다.
+	/*
 	float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
 	float DeltaYaw = CurrentBodyYaw - LastBodyYaw;
 
@@ -120,7 +122,10 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 		CurrentRot.Yaw += DeltaYaw;
 		Controller->SetControlRotation(CurrentRot);
 	}
+	*/
 
+	// 동기화는 안 해도 변수 업데이트는 해둡니다.
+	float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
 	LastBodyYaw = CurrentBodyYaw;
 
 	// -----------------------------------------------------------------
@@ -129,7 +134,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	FRotator CurrentControlRot = Controller->GetControlRotation();
 
 	// 3. 좌우(Yaw) 시야각 제한 (등 뒤 기준)
-	// [복구] 기준점도 다시 +180(등 뒤)으로 잡습니다.
+	// 기준점도 +180(등 뒤)으로 잡습니다.
 	float BodyFrontYaw = ParentBodyCharacter->GetActorRotation().Yaw + 180.0f;
 	float RelativeYaw = FRotator::NormalizeAxis(CurrentControlRot.Yaw - BodyFrontYaw);
 	float ClampedYaw = FMath::Clamp(RelativeYaw, -90.0f, 90.0f);
@@ -152,7 +157,7 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	// =================================================================
 	if (ParentBodyCharacter)
 	{
-		// 해결: 머리(애니메이션)에 전달할 때만 180도를 다시 뒤집어서 "앞"을 보게 만듭니다.
+		// [유지] 머리(애니메이션)에 전달할 때는 180도를 더해서 정면을 보게 만듭니다.
 		FRotator TargetHeadRot = Controller->GetControlRotation();
 		TargetHeadRot.Yaw += 180.0f;
 
@@ -220,26 +225,9 @@ void AUpperBodyPawn::Look(const FInputActionValue& Value)
 
 void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 {
-	// 1. 소유자(Owner) 이름 확인
-	AActor* CurrentOwner = GetOwner();
-	FString OwnerName = CurrentOwner ? CurrentOwner->GetName() : TEXT("No Owner");
-
-	// 2. 컨트롤러 및 권한 확인
-	FString ControllerName = GetController() ? GetController()->GetName() : TEXT("No Controller");
-	FString NetRole = (GetLocalRole() == ROLE_Authority) ? TEXT("Authority (Server)") : TEXT("Simulated/Autonomous (Client)");
-
-	// 화면에 출력
-	if (GEngine)
-	{
-		FString DebugMsg = FString::Printf(TEXT("Pawn: %s | Owner: %s | Controller: %s | Role: %s"),
-			*GetName(), *OwnerName, *ControllerName, *NetRole);
-		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, DebugMsg);
-	}
-
 	// 본인이 로컬에서 컨트롤 중인 Pawn이 아니면 무시
-	if (!IsLocallyControlled() || bIsAttacking || !ParentBodyCharacter) return;
+	if (!IsLocallyControlled() || !ParentBodyCharacter) return;
 
-	bIsAttacking = true;
 	ServerRequestSetAttackDetection(true);
 }
 
@@ -253,21 +241,20 @@ void AUpperBodyPawn::ServerRequestSetAttackDetection_Implementation(bool bEnable
 
 	if (bEnabled)
 	{
-		// 서버가 "하체 캐릭터"에게 멀티캐스트 재생을 명령합니다.
-		// 하체는 모든 플레이어가 공유하므로 서버 월드에서도 무기가 움직입니다.
-		ParentBodyCharacter->MulticastPlayAttack(this);
+		ParentBodyCharacter->RequestAttack();
+		//// 서버가 "하체 캐릭터"에게 멀티캐스트 재생을 명령합니다.
+		//// 하체는 모든 플레이어가 공유하므로 서버 월드에서도 무기가 움직입니다.
+		//ParentBodyCharacter->MulticastPlayAttack(this);
 
-		if (ParentBodyCharacter->AttackComponent)
-		{
-			ParentBodyCharacter->AttackComponent->SetAttackDetection(true); // 서버 물리 판정 ON
-		}
+		//if (ParentBodyCharacter->AttackComponent)
+		//{
+		//	ParentBodyCharacter->AttackComponent->SetAttackDetection(true); // 서버 물리 판정 ON
+		//}
 	}
 }
 
 void AUpperBodyPawn::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted)
 {
-	bIsAttacking = false; // 애니메이션 종료 시 변수 해제
-
 	if (HasAuthority()) // 서버에서만 판정을 종료합니다.
 	{
 		if (ParentBodyCharacter && ParentBodyCharacter->AttackComponent)
@@ -370,10 +357,6 @@ void AUpperBodyPawn::ServerRequestInteract_Implementation(AActor* TargetActor)
 
 void AUpperBodyPawn::ServerUpdateAimRotation_Implementation(FRotator NewRotation)
 {
-	// 1. 함수가 호출되었는지 확인
-	// GEngine->AddOnScreenDebugMessage(KEY, TIME, COLOR, MESSAGE);
-	GEngine->AddOnScreenDebugMessage(501, 1.f, FColor::Yellow, TEXT("[Server] RPC Received!"));
-
 	if (ParentBodyCharacter)
 	{
 		// 2. 부모가 있어서 업데이트 성공

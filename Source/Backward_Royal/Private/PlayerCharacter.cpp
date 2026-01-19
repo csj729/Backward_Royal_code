@@ -61,6 +61,14 @@ void APlayerCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// [추가] 서버 권한이 있을 때, 시작 시점의 상체 회전을 현재 몸통 회전으로 초기화
+	// 이 코드가 없으면 스폰 직후에 고개가 (0,0,0) 북쪽을 보며 꺾여있을 수 있습니다.
+	if (HasAuthority())
+	{
+		UpperBodyAimRotation = GetActorRotation();
+	}
+
+	// [기존 코드] 입력 시스템 등록
 	if (APlayerController* PlayerController = Cast<APlayerController>(Controller))
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PlayerController->GetLocalPlayer()))
@@ -89,25 +97,8 @@ void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME_CONDITION(APlayerCharacter, UpperBodyAimRotation, COND_SkipOwner);
-}
-
-void APlayerCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	// 서버(Authority)일 때만 로그 출력
-	if (HasAuthority())
-	{
-		// 현재 서버가 알고 있는 회전값
-		FString DebugMsg = FString::Printf(TEXT("[Server] AimRot: %s"), *UpperBodyAimRotation.ToString());
-
-		// 캐릭터 머리 위에 글씨 띄우기 (Red color)
-		DrawDebugString(GetWorld(), GetActorLocation() + FVector(0, 0, 100), DebugMsg, nullptr, FColor::Red, 0.0f);
-
-		// 화면 좌측 상단에도 띄우기
-		GEngine->AddOnScreenDebugMessage(123, 0.0f, FColor::Red, DebugMsg);
-	}
+	// 조건 없이 모든 클라이언트(주인 포함)에게 복제되도록 수정
+	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
 }
 
 void APlayerCharacter::Restart()
@@ -212,4 +203,11 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 void APlayerCharacter::SetUpperBodyRotation(FRotator NewRotation)
 {
 	UpperBodyAimRotation = NewRotation;
+}
+
+FRotator APlayerCharacter::GetBaseAimRotation() const
+{
+	// 원래는 컨트롤러(하체 플레이어)의 회전을 가져오지만,
+	// 우리는 상체 플레이어가 정해준 회전값(UpperBodyAimRotation)을 강제로 리턴합니다.
+	return UpperBodyAimRotation;
 }

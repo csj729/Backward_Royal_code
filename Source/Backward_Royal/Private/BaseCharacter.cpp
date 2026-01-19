@@ -38,6 +38,24 @@ ABaseCharacter::ABaseCharacter()
 
     AttackComponent = CreateDefaultSubobject<UBRAttackComponent>(TEXT("AttackComponent"));
 
+    if (GetMesh())
+    {
+        // 1. 물리(Physics)와 쿼리(Query) 모두 활성화
+        GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+        // 2. 기본 프로필 설정 (CharacterMesh 권장)
+        GetMesh()->SetCollisionProfileName(TEXT("CharacterMesh"));
+
+        // 3. Pawn(다른 플레이어)에 대해 Block 설정 -> 서로 밀리게 됨
+        GetMesh()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+
+        // 4. 카메라는 무시 (카메라가 몸 뚫을 때 덜컹거림 방지)
+        GetMesh()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+
+        // 5. 평소에는 Hit Event를 꺼둬서 불필요한 연산 방지 (공격 때만 BRAttackComponent가 켬)
+        GetMesh()->SetNotifyRigidBodyCollision(false);
+    }
+
     DefaultWalkSpeed = 600.0f;
     CurrentWeapon = nullptr; // 무기 초기화
 
@@ -124,7 +142,96 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
     CHAR_LOG(Log, TEXT("Equipped Weapon: %s"), *NewWeapon->GetName());
 }
 
-// [신규] 무기 버리기 구현
+// [신규] 공격 요청 처리 함수
+void ABaseCharacter::RequestAttack()
+{
+    // 1. 무기가 있는 경우: 기존 로직(단타) 사용
+    if (CurrentWeapon)
+    {
+        UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+        if (AnimInstance && AttackMontage)
+        {
+            // 이미 공격 몽타주가 재생 중이라면 입력을 무시하고 리턴
+            if (AnimInstance->Montage_IsPlaying(AttackMontage))
+            {
+                return;
+            }
+        }
+
+        // 무기 공격은 일단 콤보 없이 즉시 발동 (필요 시 무기 콤보도 유사하게 구현 가능)
+        MulticastPlayAttack(nullptr);
+        return;
+    }
+
+    // 2. 맨손(Unarmed) 콤보 로직
+    if (bIsCharacterAttacking)
+    {
+        // 이미 공격 중이라면 -> 입력 허용 구간(Window)일 때만 다음 공격 예약
+        if (bIsComboInputOn)
+        {
+            bIsNextComboReserved = true;
+            // GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::Green, TEXT("Combo Reserved!"));
+        }
+    }
+    else
+    {
+        // 공격 중이 아니면 -> 1타 시작
+        CurrentComboIndex = 1;
+        bIsCharacterAttacking = true;
+        bIsNextComboReserved = false;
+        MulticastPlayUnarmedCombo(CurrentComboIndex);
+    }
+}
+
+// [신규] 맨손 콤보 몽타주 재생 (멀티캐스트)
+void ABaseCharacter::MulticastPlayUnarmedCombo_Implementation(int32 SectionIndex)
+{
+    if (UnarmedComboMontage && GetMesh() && GetMesh()->GetAnimInstance())
+    {
+        UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+
+        if (!AnimInstance->Montage_IsPlaying(UnarmedComboMontage))
+        {
+            AnimInstance->Montage_Play(UnarmedComboMontage);
+        }
+
+        // 섹션 이름 (Combo1, Combo2, Combo3...)
+        FName SectionName = FName(*FString::Printf(TEXT("Combo%d"), SectionIndex));
+        AnimInstance->Montage_JumpToSection(SectionName, UnarmedComboMontage);
+    }
+}
+
+// [신규] 애니메이션 노티파이: 입력 구간 설정
+void ABaseCharacter::SetComboInputWindow(bool bEnable)
+{
+    bIsComboInputOn = bEnable;
+}
+
+// [신규] 애니메이션 노티파이: 다음 콤보 진행 여부 체크
+void ABaseCharacter::CheckNextCombo()
+{
+    if (bIsNextComboReserved)
+    {
+        // 예약된 공격이 있으면 -> 다음 콤보
+        bIsNextComboReserved = false;
+        bIsComboInputOn = false;
+
+        CurrentComboIndex++;
+        if (CurrentComboIndex > MaxComboCount) CurrentComboIndex = 1;
+
+        MulticastPlayUnarmedCombo(CurrentComboIndex);
+    }
+    else
+    {
+        // 예약 없으면 -> 공격 종료
+        bIsCharacterAttacking = false;
+        bIsComboInputOn = false;
+        CurrentComboIndex = 0;
+        // 몽타주는 BlendOut 되도록 둠
+    }
+}
+
+// 무기 버리기 구현
 void ABaseCharacter::DropCurrentWeapon()
 {
     if (!CurrentWeapon) return;

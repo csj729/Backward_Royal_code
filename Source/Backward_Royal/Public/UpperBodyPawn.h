@@ -58,8 +58,8 @@ public:
 	UAnimMontage* AttackMontage;
 
 	// 무기가 아닌 캐릭터가 이 상태를 관리합니다. (이동 제한, 중복 입력 방지 등)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
-	bool bIsAttacking;
+	//UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "State")
+	//bool bIsAttacking;
 
 	// 클라이언트에서 서버로 공격 상태 변경을 요청하는 RPC
 	UFUNCTION(Server, Reliable)

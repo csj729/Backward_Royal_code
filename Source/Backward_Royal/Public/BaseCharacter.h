@@ -7,10 +7,9 @@
 #include "BaseCharacter.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
-
 #define CHAR_LOG(Verbosity, Format, ...) UE_LOG(LogBaseChar, Verbosity, TEXT("%s: ") Format, *GetName(), ##__VA_ARGS__)
 
-class ABaseWeapon; // 전방 선언
+class ABaseWeapon;
 class UBRAttackComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathDelegate);
@@ -25,7 +24,6 @@ public:
 
 protected:
     virtual void BeginPlay() override;
-
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void Die();
 
@@ -33,7 +31,7 @@ protected:
     void MulticastDie();
 
 public:
-    // --- Modular Armor Components ---
+    // --- Components ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Armor")
     USkeletalMeshComponent* HeadMesh;
 
@@ -56,7 +54,6 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float DefaultWalkSpeed;
 
-    // --- 체력 시스템 ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float MaxHP = 100.0f;
 
@@ -66,15 +63,37 @@ public:
     UFUNCTION()
     void OnRep_CurrentHP();
 
-    // 에디터에서 공격 애니메이션을 할당하는 변수
+    // =================================================================
+    // [전투 시스템]
+    // =================================================================
+
+    // 무기 공격 몽타주
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     UAnimMontage* AttackMontage;
 
-    // 멀티캐스트 함수에 상체 Pawn 정보를 넘겨서 클라이언트 변수를 풀 수 있게 합니다.
+    // [신규] 맨손 콤보 몽타주 (Combo1, Combo2, Combo3 섹션 필요)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UAnimMontage* UnarmedComboMontage;
+
+    // [신규] 공격 요청 처리 (서버에서 호출됨)
+    void RequestAttack();
+
+    // 기존 무기 공격 멀티캐스트
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlayAttack(APawn* RequestingPawn);
 
-    // 데미지 처리 오버라이드
+    // [신규] 맨손 콤보 멀티캐스트
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastPlayUnarmedCombo(int32 SectionIndex);
+
+    // [신규] 애니메이션 노티파이용 함수 (BlueprintCallable 필수)
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void SetComboInputWindow(bool bEnable); // 입력 허용 구간 열기/닫기
+
+    UFUNCTION(BlueprintCallable, Category = "Combat")
+    void CheckNextCombo(); // 다음 콤보로 넘어갈지 결정
+
+    // 데미지 처리
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
@@ -82,26 +101,32 @@ public:
 
     bool bIsDead = false;
 
-    // =================================================================
-    // [확정] 무기 시스템 (BaseCharacter 소유)
-    // =================================================================
-
-    // 현재 장착 중인 무기
+    // --- Weapon ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", Replicated)
     ABaseWeapon* CurrentWeapon;
 
-    // 무기 장착 (무기 액터를 받아 처리)
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void EquipWeapon(ABaseWeapon* NewWeapon);
 
-    // 현재 무기 버리기
     UFUNCTION(BlueprintCallable, Category = "Combat")
     void DropCurrentWeapon();
 
-    // --- Functions ---
+    // --- Customization ---
     UFUNCTION(BlueprintCallable, Category = "Equipment")
     void EquipArmor(EArmorSlot Slot, const FArmorData& NewArmor);
 
     UFUNCTION(BlueprintCallable, Category = "Customization")
     void SetArmorColor(EArmorSlot Slot, FLinearColor Color);
+
+protected:
+    // [신규] 콤보 관련 상태 변수
+    int32 CurrentComboIndex = 0;
+    int32 MaxComboCount = 2;
+
+    // 캐릭터 자체의 공격 상태 플래그
+    bool bIsCharacterAttacking = false;
+
+    // 입력 버퍼링용 플래그
+    bool bIsComboInputOn = false;      // 입력 허용 구간인가?
+    bool bIsNextComboReserved = false; // 다음 공격이 예약되었는가?
 };

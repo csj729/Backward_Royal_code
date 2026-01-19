@@ -16,25 +16,32 @@ class BACKWARD_ROYAL_API APlayerCharacter : public ABaseCharacter
 public:
 	APlayerCharacter();
 
+	// -------------------------------------------------------------------
+	// [공용/외부 접근 가능 함수]
+	// -------------------------------------------------------------------
+
 	// 상체(Player A)가 이 캐릭터의 상반신 회전값을 업데이트할 때 호출
 	void SetUpperBodyRotation(FRotator NewRotation);
 
-	// 애니메이션 블루프린트에서 사용할 변수
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop|Animation", Replicated)
-	FRotator UpperBodyAimRotation;
-
-	// 상체 Pawn을 저장하고 관리하기 위한 함수 및 변수
+	// 상체 Pawn을 저장하고 관리하기 위한 함수
 	void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
 
-	void Restart() override;
+	// [중요] 부모 클래스(APawn, ACharacter)에서 Public인 함수들은 
+	// 여기서도 Public에 두는 것이 안전합니다. (외부 클래스 접근 이슈 방지)
+	virtual void Restart() override;
 	virtual void OnRep_PlayerState() override;
-
-protected:
-	virtual void BeginPlay() override;
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	virtual void Tick(float DeltaTime) override;
+
+	// ★ 핵심: 시선 방향 계산 재정의 (상체 플레이어의 시선을 따르도록 함)
+	virtual FRotator GetBaseAimRotation() const override;
+
+protected:
+	// -------------------------------------------------------------------
+	// [내부 로직 / 상속용 함수]
+	// -------------------------------------------------------------------
+	virtual void BeginPlay() override;
+	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	// 이동 (Player B 전용)
 	void Move(const FInputActionValue& Value);
@@ -45,6 +52,14 @@ protected:
 	class AUpperBodyPawn* CurrentUpperBodyPawn;
 
 public:
+	// -------------------------------------------------------------------
+	// [변수 / 컴포넌트]
+	// -------------------------------------------------------------------
+
+	// 애니메이션 블루프린트에서 사용할 변수
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop|Animation", Replicated)
+	FRotator UpperBodyAimRotation;
+
 	// --- Camera (Rear View) ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
 	class USpringArmComponent* RearCameraBoom;
@@ -53,8 +68,8 @@ public:
 	class UCameraComponent* RearCamera;
 
 	// --- Mount Point ---
-	// [중요] 기존 UpperBodyMountPoint 삭제 -> HeadMountPoint로 대체
 	// Player A(상반신) Pawn이 부착될 위치
+	// (팀원이 무기 장착 등에 이 컴포넌트를 참조할 수 있으므로 유지해야 함)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop")
 	class USceneComponent* HeadMountPoint;
 

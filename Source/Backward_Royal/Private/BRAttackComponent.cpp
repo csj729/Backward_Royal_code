@@ -25,39 +25,67 @@ void UBRAttackComponent::ServerSetAttackDetection_Implementation(bool bEnabled)
 
 void UBRAttackComponent::SetAttackDetection(bool bEnabled)
 {
-	bIsDetectionActive = bEnabled;
-	ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
+    bIsDetectionActive = bEnabled;
+    ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
+    if (!OwnerChar) return;
 
-	if (OwnerChar && OwnerChar->CurrentWeapon)
-	{
-		UStaticMeshComponent* WeaponMesh = OwnerChar->CurrentWeapon->WeaponMesh;
-		if (WeaponMesh)
-		{
-			if (bEnabled)
-			{
-				// [서버 필수] 충돌 설정 강제 활성화
-				WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-				WeaponMesh->SetCollisionResponseToAllChannels(ECR_Block); // 일단 모든 채널 Block으로 테스트
-				WeaponMesh->SetNotifyRigidBodyCollision(true); // Simulation Generates Hit Events
+    // 1. 무기가 있는 경우 (기존 로직)
+    if (OwnerChar->CurrentWeapon)
+    {
+        UStaticMeshComponent* WeaponMesh = OwnerChar->CurrentWeapon->WeaponMesh;
+        if (WeaponMesh)
+        {
+            if (bEnabled)
+            {
+                WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                WeaponMesh->SetCollisionResponseToAllChannels(ECR_Block);
+                WeaponMesh->SetNotifyRigidBodyCollision(true);
 
-				// 무기 메시에 직접 바인딩되어 있는지 확인
-				if (!WeaponMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
-				{
-					WeaponMesh->OnComponentHit.AddDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
-				}
+                if (!WeaponMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
+                {
+                    WeaponMesh->OnComponentHit.AddDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
+                }
+            }
+            else
+            {
+                WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                WeaponMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
+                HitActors.Empty();
+            }
+        }
+    }
+    // 2. [추가] 무기가 없는 경우 (맨손 공격)
+    else
+    {
+        USkeletalMeshComponent* BodyMesh = OwnerChar->GetMesh();
 
-				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan, TEXT("Server: Collision Enabled"));
-			}
-			else
-			{
-				WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-				WeaponMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
-				GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan, TEXT("Server: Collision Disabled"));
+        if (BodyMesh)
+        {
+            if (bEnabled)
+            {
+                // [변경] 물리 속성(Block)은 건드리지 않고, 히트 이벤트 생성만 켭니다.
+                BodyMesh->SetNotifyRigidBodyCollision(true);
 
-				HitActors.Empty();
-			}
-		}
-	}
+                if (!BodyMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
+                {
+                    BodyMesh->OnComponentHit.AddDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
+                }
+
+                // 디버그
+                GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Red, TEXT("Unarmed Attack Window OPEN"));
+            }
+            else
+            {
+                // 공격 종료 시 이벤트 생성 끄기 (최적화)
+                BodyMesh->SetNotifyRigidBodyCollision(false);
+
+                BodyMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
+                HitActors.Empty();
+
+                GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Green, TEXT("Unarmed Attack Window CLOSED"));
+            }
+        }
+    }
 }
 
 void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
@@ -72,6 +100,23 @@ void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponen
 	ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
 	if (!OwnerChar) return;
 
+    // [중요] 부위별 판정 (맨손일 때만)
+    if (OwnerChar->CurrentWeapon == nullptr)
+    {
+        // Physics Asset에 설정된 Body(Bone) 이름 확인
+        FName HitBone = Hit.MyBoneName;
+        FString HitBoneStr = HitBone.ToString().ToLower();
+
+        // "hand" 또는 "fist" 등이 포함된 뼈인지 확인
+        bool bIsHandHit = HitBoneStr.Contains(TEXT("hand")) || HitBoneStr.Contains(TEXT("fist")) || HitBoneStr.Contains(TEXT("index"));
+
+        if (!bIsHandHit)
+        {
+            // 몸싸움 중이라 몸통이나 발이 닿은 경우 -> 데미지 판정 X
+            return;
+        }
+    }
+
 	// 클라이언트와 서버 양쪽에서 즉시 멈춰서 타격감을 극대화합니다.
 	OwnerChar->StopAnimMontage();
 
@@ -83,11 +128,19 @@ void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponen
 
 	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Applying Damage on Server"));
 
-	float DamageValue = 10.0f;
+    float DamageValue = 0.0f;
 
-	if (OwnerChar->CurrentWeapon) DamageValue = OwnerChar->CurrentWeapon->CurrentWeaponData.BaseDamage;
-	ProcessHitDamage(OtherActor, OtherComp, NormalImpulse, Hit, DamageValue);
+    if (OwnerChar->CurrentWeapon)
+    {
+        DamageValue = OwnerChar->CurrentWeapon->CurrentWeaponData.BaseDamage;
+    }
+    else
+    {
+        // 맨손 기본 데미지 설정
+        DamageValue = 10.0f;
+    }
 
+    ProcessHitDamage(OtherActor, OtherComp, NormalImpulse, Hit, DamageValue);
 }
 
 void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit, float DamageMod)
