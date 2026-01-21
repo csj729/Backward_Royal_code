@@ -253,8 +253,6 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
     CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
 
-    UpdateHPUI();
-
     if (CurrentHP <= 0.0f) Die();
 
     return ActualDamage;
@@ -312,9 +310,6 @@ void ABaseCharacter::MulticastDie_Implementation()
 
 void ABaseCharacter::UpdateHPUI()
 {
-    // [2025-11-18] 커스텀 로그 매크로 사용
-    CHAR_LOG(Log, TEXT("HP 변경됨: %.1f / %.1f"), CurrentHP, MaxHP);
-
     if (OnHPChanged.IsBound())
     {
         OnHPChanged.Broadcast(CurrentHP, MaxHP);
@@ -332,8 +327,6 @@ void ABaseCharacter::OnRep_CurrentHP()
         // 사망 처리 등 클라이언트 측 가시적 효과가 필요하다면 여기서 호출 가능
         // Die(); 
     }
-
-    CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);
 }
 
 void ABaseCharacter::MulticastPlayWeaponAttack_Implementation(APawn* RequestingPawn)

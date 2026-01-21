@@ -133,7 +133,6 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 
 void ABRPlayerState::OnRep_PlayerRole()
 {
-	// [핵심] 역할 변경 사실을 구독자(UI 등)에게 브로드캐스트
 	if (OnPlayerRoleChanged.IsBound())
 	{
 		OnPlayerRoleChanged.Broadcast(bIsLowerBody);

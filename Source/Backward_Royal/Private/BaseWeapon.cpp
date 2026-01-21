@@ -86,8 +86,8 @@ void ABaseWeapon::LoadWeaponData()
 
 void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
 {
-    //LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Mass: %f",
-    //    *WeaponRowName.ToString(), NewStats.MassKg);
+    LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Mass: %f",
+        *WeaponRowName.ToString(), NewStats.MassKg);
 
     // 화면에 즉시 표시 (디버깅용)
     if (GEngine)

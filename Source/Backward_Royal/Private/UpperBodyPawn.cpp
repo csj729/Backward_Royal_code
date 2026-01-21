@@ -233,9 +233,9 @@ void AUpperBodyPawn::Attack(const FInputActionValue& Value)
 
 void AUpperBodyPawn::ServerRequestSetAttackDetection_Implementation(bool bEnabled)
 {
-	//FString NetMode = HasAuthority() ? TEXT("Server") : TEXT("Client");
-	//GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan,
-	//	FString::Printf(TEXT("[%s] Collision Enabled (Pawn: %s)"), *NetMode, *GetName()));
+	FString NetMode = HasAuthority() ? TEXT("Server") : TEXT("Client");
+	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan,
+		FString::Printf(TEXT("[%s] Collision Enabled (Pawn: %s)"), *NetMode, *GetName()));
 
 	if (!ParentBodyCharacter) return;
 
@@ -362,8 +362,8 @@ void AUpperBodyPawn::ServerUpdateAimRotation_Implementation(FRotator NewRotation
 		// 2. 부모가 있어서 업데이트 성공
 		ParentBodyCharacter->SetUpperBodyRotation(NewRotation);
 
-		//FString Msg = FString::Printf(TEXT("[Server] Update Success! Angle: %f"), NewRotation.Yaw);
-		//GEngine->AddOnScreenDebugMessage(502, 1.f, FColor::Green, Msg);
+		FString Msg = FString::Printf(TEXT("[Server] Update Success! Angle: %f"), NewRotation.Yaw);
+		GEngine->AddOnScreenDebugMessage(502, 1.f, FColor::Green, Msg);
 	}
 	else
 	{

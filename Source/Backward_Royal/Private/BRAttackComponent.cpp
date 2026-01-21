@@ -73,7 +73,7 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
                 }
 
                 // 디버그
-                // GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Red, TEXT("Unarmed Attack Window OPEN"));
+                GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Red, TEXT("Unarmed Attack Window OPEN"));
             }
             else
             {
@@ -83,7 +83,7 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
                 BodyMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
                 HitActors.Empty();
 
-                // GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Green, TEXT("Unarmed Attack Window CLOSED"));
+                GEngine->AddOnScreenDebugMessage(-1, 0.5f, FColor::Green, TEXT("Unarmed Attack Window CLOSED"));
             }
         }
     }
@@ -123,7 +123,7 @@ void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponen
 	// 4. [서버 전용] 데미지 및 물리 로직
 	if (HitActors.Contains(OtherActor)) return;
 
-	// GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Applying Damage on Server"));
+	GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Green, TEXT("Applying Damage on Server"));
 
     ProcessHitDamage(OtherActor, OtherComp, NormalImpulse, Hit);
 }
@@ -189,24 +189,23 @@ float UBRAttackComponent::GetCalculatedAttackSpeed() const
 
         FinalSpeed = MassRatio * WeaponSpeedCoeff * ABaseWeapon::GlobalAttackSpeedMultiplier;
 
-        /*GEngine->AddOnScreenDebugMessage(
+        GEngine->AddOnScreenDebugMessage(
             -1,
             2.f,
             FColor::Green,
             FString::Printf(TEXT("Weapon Attack Speed: %.2f (Mass: %.1f, GlobalMult: %.1f)"), FinalSpeed, WeaponMass, ABaseWeapon::GlobalAttackSpeedMultiplier)
-        );*/
+        );
     }
     // 2. 맨손인 경우: 글로벌 배율만 적용 (혹은 별도 맨손 계수)
     else
     {
         FinalSpeed = ABaseWeapon::GlobalAttackSpeedMultiplier;
-
-        /*GEngine->AddOnScreenDebugMessage(
+        GEngine->AddOnScreenDebugMessage(
             -1,
             2.f,
             FColor::Green,
             FString::Printf(TEXT("Unarmed Attack Speed: %.2f"), FinalSpeed)
-        );*/
+        );
     }
 
     // 게임플레이 한계치 설정 (너무 느리거나 빠르면 비현실적)

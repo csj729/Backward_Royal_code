@@ -347,8 +347,7 @@ void ABRGameMode::StartGame()
 	bool bIsPIE = World->IsPlayInEditor();
 	ENetMode NetMode = World->GetNetMode();
 	
-	// PIE에서는 Seamless Travel이 작동하지 않으므로 일반 
-	// Travel 사용
+	// PIE에서는 Seamless Travel이 작동하지 않으므로 일반 ServerTravel 사용
 	bool bShouldUseSeamlessTravel = bUseSeamlessTravel && !bIsPIE;
 	
 	if (bIsPIE)

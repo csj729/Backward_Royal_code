@@ -71,7 +71,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", ReplicatedUsing = OnRep_CurrentHP)
     float CurrentHP;
 
-    UFUNCTION(BlueprintCallable)
+    UFUNCTION()
     void OnRep_CurrentHP();
 
     // =================================================================
@@ -104,6 +104,7 @@ public:
 
     UFUNCTION(BlueprintCallable)
     void EnhanceFistPhysics(bool bEnable);
+
 
     // 데미지 처리
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;

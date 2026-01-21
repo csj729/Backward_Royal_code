@@ -143,22 +143,35 @@ void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCom
 {
 	if (!PlayerInputComponent) return;
 
+	// 기존 바인딩 초기화 (안전을 위해 유지)
 	PlayerInputComponent->ClearActionBindings();
 
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
+		// [기존 코드 유지] 이동
 		if (MoveAction)
 			EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
 
+		// [기존 코드 유지] 시선
 		if (LookAction)
 			EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
 
+		// [기존 코드 유지] 점프
 		if (JumpAction)
 		{
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
+		}
+
+		// [새로 추가된 코드] 달리기 (Sprint)
+		if (SprintAction)
+		{
+			// 눌렀을 때 -> 빨라짐
+			EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::SprintStart);
+			// 뗐을 때 -> 느려짐
+			EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::SprintEnd);
 		}
 	}
 }
@@ -213,6 +226,18 @@ FRotator APlayerCharacter::GetBaseAimRotation() const
 	return UpperBodyAimRotation;
 }
 
+void APlayerCharacter::SprintStart(const FInputActionValue& Value)
+{
+	// 캐릭터 무브먼트의 최대 속도를 달리기 속도로 변경
+	GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+}
+
+void APlayerCharacter::SprintEnd(const FInputActionValue& Value)
+{
+	// 키를 떼면 다시 걷기 속도로 복구
+	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+}
+
 void APlayerCharacter::UpdateStaminaUI()
 {
 	if (OnStaminaChanged.IsBound())
@@ -223,8 +248,6 @@ void APlayerCharacter::UpdateStaminaUI()
 
 void APlayerCharacter::OnRep_CurrentStamina()
 {
-	// 이 함수는 서버에서 CurrentHP 변수가 변경되어 클라이언트로 복제될 때 실행됩니다.
-	// 보통 여기에서 체력 바(UI)를 업데이트하는 로직을 넣습니다.
 	UpdateStaminaUI();
 
 	if (CurrentStamina <= 0.0f)
@@ -232,6 +255,4 @@ void APlayerCharacter::OnRep_CurrentStamina()
 		// 스태미나 소비 행동 잠금
 		return;
 	}
-
-	CHAR_LOG(Log, TEXT("스태미나가 복제되었습니다. 현재 스태미나 : %.1f"), CurrentStamina);
 }
