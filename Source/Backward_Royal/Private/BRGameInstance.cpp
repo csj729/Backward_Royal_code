@@ -12,6 +12,7 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "BaseWeapon.h"
+#include "GlobalBalanceData.h"
 #include "UObject/Package.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/GameModeBase.h"
@@ -242,6 +243,9 @@ void UBRGameInstance::ReloadAllConfigs()
 		#endif
 		}
 	}
+	
+	// 글로벌 배율 적용 로직 호출
+	ApplyGlobalMultipliers();
 
 	// 3. 월드에 이미 존재하는 무기들에게 최신 데이터를 적용 (기존 로직 유지)
 	if (GetWorld())
@@ -419,4 +423,32 @@ void UBRGameInstance::SaveDataTableToAsset(UDataTable* TargetTable)
 		GI_LOG(Error, TEXT("Asset 저장 실패: %s"), *PackageFileName);
 	}
 #endif
+}
+
+void UBRGameInstance::ApplyGlobalMultipliers()
+{
+	// ConfigDataMap에서 "GlobalSettings"라는 키로 테이블을 찾아옵니다.
+	if (UDataTable** TargetTablePtr = ConfigDataMap.Find(TEXT("GlobalSettings")))
+	{
+		UDataTable* GlobalTable = *TargetTablePtr;
+		if (GlobalTable)
+		{
+			// 글로벌 설정은 "Default"라는 이름의 단일 행으로 관리합니다.
+			static const FString ContextString(TEXT("Global Settings Context"));
+			FGlobalBalanceData* FoundData = GlobalTable->FindRow<FGlobalBalanceData>(FName("Default"), ContextString);
+
+			if (FoundData)
+			{
+				// ABaseWeapon의 static 변수 갱신
+				ABaseWeapon::GlobalDamageMultiplier = FoundData->Global_Weapon_DamageMultiplier;
+				ABaseWeapon::GlobalImpulseMultiplier = FoundData->Global_Weapon_ImpulseMultiplier;
+				ABaseWeapon::GlobalAttackSpeedMultiplier = FoundData->Global_Weapon_AttackSpeedMultiplier;
+
+				GI_LOG(Display, TEXT("Global Multipliers Updated: Dmg(%.2f), Imp(%.2f), Spd(%.2f)"),
+					ABaseWeapon::GlobalDamageMultiplier,
+					ABaseWeapon::GlobalImpulseMultiplier,
+					ABaseWeapon::GlobalAttackSpeedMultiplier);
+			}
+		}
+	}
 }

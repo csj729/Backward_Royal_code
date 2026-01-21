@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "BRUserInfo.h"
 #include "BRGameState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerListChanged);
@@ -43,6 +44,14 @@ public:
 	// 플레이어 목록 업데이트
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void UpdatePlayerList();
+
+	// 모든 플레이어의 UserInfo 배열 가져오기 (UI에서 사용)
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	TArray<FBRUserInfo> GetAllPlayerUserInfo() const;
+
+	// 특정 플레이어의 UserInfo 가져오기
+	UFUNCTION(BlueprintCallable, Category = "Room")
+	FBRUserInfo GetPlayerUserInfo(int32 PlayerIndex) const;
 
 	// 게임 시작 가능 여부 확인
 	UFUNCTION(BlueprintCallable, Category = "Room")

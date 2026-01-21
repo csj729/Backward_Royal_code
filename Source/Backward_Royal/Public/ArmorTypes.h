@@ -1,27 +1,18 @@
-// ArmorTypes.h
+ï»¿// ArmorTypes.h
 #pragma once
 
 #include "CoreMinimal.h"
 #include "ArmorTypes.generated.h"
 
 UENUM(BlueprintType)
-enum class EArmorType : uint8
-{
-    Plate,
-    Leather,
-    Cloth,
-    None
-};
-
-UENUM(BlueprintType)
 enum class EArmorSlot : uint8
 {
-    Head,   // ¸Ó¸®
-    Chest,  // »óÃ¼ (°©¿Ê)
-    Hands,  // Àå°©
-    Legs,   // ÇÏÀÇ
-    Feet,   // ½Å¹ß
-    None    // ¾øÀ½
+    Head,   // ë¨¸ë¦¬
+    Chest,  // ìƒì²´ (ê°‘ì˜·)
+    Hands,  // ì¥ê°‘
+    Legs,   // í•˜ì˜
+    Feet,   // ì‹ ë°œ
+    None    // ì—†ìŒ
 };
 
 USTRUCT(BlueprintType)
@@ -33,20 +24,8 @@ struct FArmorData : public FTableRowBase
     FName DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    USkeletalMesh* ArmorMesh; // Àû¿ëÇÒ ¸Ş½¬
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EArmorType Type;
+    USkeletalMesh* ArmorMesh; // ì ìš©í•  ë©”ì‰¬
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EArmorSlot EquipSlot;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float DefensePower; // ¹æ¾î·Â
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float WeightKg; // ¹«°Ô (¼Óµµ¿¡ ¿µÇâ)
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float Durability; // ³»±¸µµ
 };

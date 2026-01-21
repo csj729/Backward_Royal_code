@@ -13,6 +13,7 @@ class ABaseWeapon;
 class UBRAttackComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathDelegate);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHPChanged, float, CurrentHP, float, MaxHP);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABaseCharacter : public ACharacter
@@ -50,9 +51,19 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
     UBRAttackComponent* AttackComponent;
 
+    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics")
+    //UPhysicsControlComponent* PhysicsControlComp;
+
     // --- Stats ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float DefaultWalkSpeed;
+
+    // 블루프린트 UI에서 바인딩할 변수
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnHPChanged OnHPChanged;
+
+    // 체력이 변할 때 공통적으로 호출할 헬퍼 함수
+    void UpdateHPUI();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float MaxHP = 100.0f;
@@ -60,7 +71,7 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats", ReplicatedUsing = OnRep_CurrentHP)
     float CurrentHP;
 
-    UFUNCTION()
+    UFUNCTION(BlueprintCallable)
     void OnRep_CurrentHP();
 
     // =================================================================
@@ -70,28 +81,29 @@ public:
     // 무기 공격 몽타주
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
     UAnimMontage* AttackMontage;
+    // 펀치 몽타주
+    UPROPERTY(EditAnywhere, Category = "Combat")
+    UAnimMontage* PunchMontage_L;
 
-    // [신규] 맨손 콤보 몽타주 (Combo1, Combo2, Combo3 섹션 필요)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    UAnimMontage* UnarmedComboMontage;
+    UPROPERTY(EditAnywhere, Category = "Combat")
+    UAnimMontage* PunchMontage_R;
+
+    // 다음 공격이 왼손인지 확인하는 플래그
+    bool bNextAttackIsLeft = false;
 
     // [신규] 공격 요청 처리 (서버에서 호출됨)
     void RequestAttack();
 
     // 기존 무기 공격 멀티캐스트
     UFUNCTION(NetMulticast, Reliable)
-    void MulticastPlayAttack(APawn* RequestingPawn);
+    void MulticastPlayWeaponAttack(APawn* RequestingPawn);
 
-    // [신규] 맨손 콤보 멀티캐스트
+    // 공격 실행 (몽타주 기반)
     UFUNCTION(NetMulticast, Reliable)
-    void MulticastPlayUnarmedCombo(int32 SectionIndex);
+    void MulticastPlayPunch(UAnimMontage* TargetMontage);
 
-    // [신규] 애니메이션 노티파이용 함수 (BlueprintCallable 필수)
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void SetComboInputWindow(bool bEnable); // 입력 허용 구간 열기/닫기
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void CheckNextCombo(); // 다음 콤보로 넘어갈지 결정
+    UFUNCTION(BlueprintCallable)
+    void EnhanceFistPhysics(bool bEnable);
 
     // 데미지 처리
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
@@ -119,14 +131,7 @@ public:
     void SetArmorColor(EArmorSlot Slot, FLinearColor Color);
 
 protected:
-    // [신규] 콤보 관련 상태 변수
-    int32 CurrentComboIndex = 0;
-    int32 MaxComboCount = 2;
-
     // 캐릭터 자체의 공격 상태 플래그
     bool bIsCharacterAttacking = false;
-
-    // 입력 버퍼링용 플래그
-    bool bIsComboInputOn = false;      // 입력 허용 구간인가?
-    bool bIsNextComboReserved = false; // 다음 공격이 예약되었는가?
+    
 };

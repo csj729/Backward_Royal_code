@@ -10,8 +10,10 @@
 #include "InputMappingContext.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "Blueprint/UserWidget.h"
 
 ABRPlayerController::ABRPlayerController()
+	: CurrentMenuWidget(nullptr)
 {
 	// CheatManager 클래스 설정
 	CheatClass = UBRCheatManager::StaticClass();
@@ -36,6 +38,25 @@ void ABRPlayerController::BeginPlay()
 		Engine->OnNetworkFailure().AddUObject(this, &ABRPlayerController::HandleNetworkFailure);
 		UE_LOG(LogTemp, Log, TEXT("[PlayerController] 네트워크 실패 감지 델리게이트 바인딩 완료"));
 	}
+
+	// 클라이언트에서만 초기 UI 표시
+	if (IsLocalController())
+	{
+		// 약간의 지연 후 UI 표시 (모든 시스템이 초기화된 후)
+		FTimerHandle TimerHandle;
+		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+		{
+			if (EntranceMenuWidgetClass)
+			{
+				ShowEntranceMenu();
+				UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시"));
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[PlayerController] EntranceMenuWidgetClass가 설정되지 않았습니다. 블루프린트에서 설정해주세요."));
+			}
+		}, 0.1f, false);
+	}
 }
 
 void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -44,6 +65,13 @@ void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UEngine* Engine = GEngine)
 	{
 		Engine->OnNetworkFailure().RemoveAll(this);
+	}
+
+	// 현재 위젯 정리
+	if (CurrentMenuWidget)
+	{
+		CurrentMenuWidget->RemoveFromParent();
+		CurrentMenuWidget = nullptr;
 	}
 	
 	Super::EndPlay(EndPlayReason);
@@ -753,6 +781,92 @@ void ABRPlayerController::SetupRoleInput(bool bIsLower)
 		{
 			// 클라이언트에게 입력 시스템 재시작 명령
 			ClientRestart(P);
+		}
+	}
+}
+
+// ========== UI 관리 함수 구현 ==========
+
+void ABRPlayerController::ShowEntranceMenu()
+{
+	if (EntranceMenuWidgetClass)
+	{
+		ShowMenuWidget(EntranceMenuWidgetClass);
+		UE_LOG(LogTemp, Log, TEXT("[PlayerController] EntranceMenu 표시"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerController] EntranceMenuWidgetClass가 설정되지 않았습니다."));
+	}
+}
+
+void ABRPlayerController::ShowJoinMenu()
+{
+	if (JoinMenuWidgetClass)
+	{
+		ShowMenuWidget(JoinMenuWidgetClass);
+		UE_LOG(LogTemp, Log, TEXT("[PlayerController] JoinMenu 표시"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerController] JoinMenuWidgetClass가 설정되지 않았습니다."));
+	}
+}
+
+void ABRPlayerController::ShowLobbyMenu()
+{
+	if (LobbyMenuWidgetClass)
+	{
+		ShowMenuWidget(LobbyMenuWidgetClass);
+		UE_LOG(LogTemp, Log, TEXT("[PlayerController] LobbyMenu 표시"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerController] LobbyMenuWidgetClass가 설정되지 않았습니다."));
+	}
+}
+
+void ABRPlayerController::HideCurrentMenu()
+{
+	if (CurrentMenuWidget)
+	{
+		CurrentMenuWidget->RemoveFromParent();
+		CurrentMenuWidget = nullptr;
+		UE_LOG(LogTemp, Log, TEXT("[PlayerController] 현재 메뉴 숨김"));
+	}
+}
+
+void ABRPlayerController::ShowMenuWidget(TSubclassOf<UUserWidget> WidgetClass)
+{
+	// 클라이언트에서만 실행
+	if (!IsLocalController())
+	{
+		return;
+	}
+
+	// 현재 위젯이 있으면 제거
+	if (CurrentMenuWidget)
+	{
+		CurrentMenuWidget->RemoveFromParent();
+		CurrentMenuWidget = nullptr;
+	}
+
+	// 새 위젯 생성 및 표시
+	if (WidgetClass)
+	{
+		CurrentMenuWidget = CreateWidget<UUserWidget>(this, WidgetClass);
+		if (CurrentMenuWidget)
+		{
+			CurrentMenuWidget->AddToViewport();
+			// 입력 모드 설정 (UI에 포커스)
+			FInputModeUIOnly InputMode;
+			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+			SetInputMode(InputMode);
+			bShowMouseCursor = true;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[PlayerController] 위젯 생성 실패"));
 		}
 	}
 }

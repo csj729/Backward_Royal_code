@@ -60,6 +60,35 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Input")
 	class UInputMappingContext* UpperBodyContext;
 
+	// ========== UI 관리 시스템 ==========
+	
+	// 초기 UI 위젯 클래스 (에디터에서 설정)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+	TSubclassOf<class UUserWidget> EntranceMenuWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+	TSubclassOf<class UUserWidget> JoinMenuWidgetClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "UI")
+	TSubclassOf<class UUserWidget> LobbyMenuWidgetClass;
+
+	// UI 전환 함수들
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ShowEntranceMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ShowJoinMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void ShowLobbyMenu();
+
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	void HideCurrentMenu();
+
+	// 현재 표시 중인 위젯 가져오기
+	UFUNCTION(BlueprintCallable, Category = "UI")
+	class UUserWidget* GetCurrentMenuWidget() const { return CurrentMenuWidget; }
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -94,5 +123,12 @@ private:
 	void RequestRandomTeams();
 	void RequestChangePlayerTeam(int32 PlayerIndex, int32 NewTeamNumber);
 	void RequestStartGame();
+
+	// UI 관리 내부 함수
+	void ShowMenuWidget(TSubclassOf<class UUserWidget> WidgetClass);
+	
+	// 현재 표시 중인 위젯
+	UPROPERTY()
+	class UUserWidget* CurrentMenuWidget;
 };
 

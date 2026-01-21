@@ -3,7 +3,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
+#include "BRUserInfo.h"
 #include "BRPlayerState.generated.h"
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerState : public APlayerState
@@ -34,6 +37,22 @@ public:
 	// 상체인 경우: 연결된 하체 플레이어의 인덱스
 	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
 	int32 ConnectedPlayerIndex;
+
+	// 사용자 고유 ID (예: Steam ID, 계정 ID 등)
+	UPROPERTY(ReplicatedUsing = OnRep_UserUID, BlueprintReadWrite, Category = "User Info")
+	FString UserUID;
+
+	// 플레이어 정보 구조체 가져오기 (UI에서 사용)
+	UFUNCTION(BlueprintCallable, Category = "User Info")
+	FBRUserInfo GetUserInfo() const;
+
+	// UserUID 설정
+	UFUNCTION(BlueprintCallable, Category = "User Info")
+	void SetUserUID(const FString& NewUserUID);
+
+	// UserUID 변경 시 호출되는 이벤트
+	UFUNCTION()
+	void OnRep_UserUID();
 
 	// 팀 번호 설정
 	UFUNCTION(BlueprintCallable, Category = "Team")
@@ -66,6 +85,9 @@ public:
 	// 플레이어 역할 변경 시 호출되는 이벤트
 	UFUNCTION()
 	void OnRep_PlayerRole();
+
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnPlayerRoleChanged OnPlayerRoleChanged;
 
 	void SwapControlWithPartner();
 

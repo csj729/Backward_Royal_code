@@ -33,7 +33,15 @@ public:
 	 * 단일 함수로 모든 데미지 처리
 	 * @param DamageMod 데미지 계수 (주먹/무기 스탯 등)
 	 */
-	void ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit, float DamageMod);
+	void ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit);
+
+	/** 현재 상태(무기 유무 등)를 기반으로 최종 공격 속도를 계산합니다. */
+	UFUNCTION(BlueprintCallable, Category = "Combat")
+	float GetCalculatedAttackSpeed() const;
+
+	/** 공격 속도 기준 무게 (C# 툴의 영향을 받지 않는 내부 보정치) */
+	UPROPERTY(EditAnywhere, Category = "Combat|Settings")
+	float StandardMass = 10.0f;
 
 private:
 	bool bIsDetectionActive = false;

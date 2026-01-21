@@ -1,10 +1,10 @@
-// WeaponTypes.h
+ï»¿// WeaponTypes.h
 #pragma once
 
 #include "CoreMinimal.h"
 #include "WeaponTypes.generated.h"
 
-// ¹«±â Á¾·ù
+// ë¬´ê¸° ì¢…ë¥˜
 UENUM(BlueprintType)
 enum class EWeaponType : uint8
 {
@@ -13,15 +13,15 @@ enum class EWeaponType : uint8
     None
 };
 
-// ¹«±â µ¥¹ÌÁö Å¸ÀÔ (³¯Ä«·Î¿ò vs µĞÅ¹ÇÔ)
+// ë¬´ê¸° ë°ë¯¸ì§€ íƒ€ì… (ë‚ ì¹´ë¡œì›€ vs ë‘”íƒí•¨)
 UENUM(BlueprintType)
 enum class EDamageCategory : uint8
 {
-    Slash_Pierce, // µµ°Ë·ù (º£±â/Âî¸£±â)
-    Blunt         // µĞ±â·ù (Å¸°İ)
+    Slash_Pierce, // ë„ê²€ë¥˜ (ë² ê¸°/ì°Œë¥´ê¸°)
+    Blunt         // ë‘”ê¸°ë¥˜ (íƒ€ê²©)
 };
 
-// ¹«±â ½ºÅÈ ±¸Á¶Ã¼ (µ¥ÀÌÅÍ Å×ÀÌºí¿ë)
+// ë¬´ê¸° ìŠ¤íƒ¯ êµ¬ì¡°ì²´ (ë°ì´í„° í…Œì´ë¸”ìš©)
 USTRUCT(BlueprintType)
 struct FWeaponData : public FTableRowBase
 {
@@ -34,20 +34,21 @@ struct FWeaponData : public FTableRowBase
     FName DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float BaseDamage; // ±âº» µ¥¹ÌÁö
+    float MassKg; // ë¬´ê¸° ì§ˆëŸ‰ (ë¬¼ë¦¬ ì—°ì‚°ìš©)
+
+    // --- ë°¸ëŸ°ì‹± ë°°ìœ¨ (ê°œë³„ ë¬´ê¸°ìš©) ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float DamageCoefficient = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MassKg; // ¹«±â Áú·® (¹°¸® ¿¬»ê¿ë)
+    float ImpulseCoefficient = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float ArmorPenetration; // ¹æ¾î±¸ °üÅë·Â (0.0 ~ 1.0)
+    float AttackSpeedCoefficient = 1.0f;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float FleshDamageMultiplier; // ¸Ç¸ö Ãß°¡ µ¥¹ÌÁö ¹èÀ²
+    EDamageCategory DamageCategory; // ë°ë¯¸ì§€ íƒ€ì…
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EDamageCategory DamageCategory; // µ¥¹ÌÁö Å¸ÀÔ
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    EWeaponType WeaponType; // ¹«±â Å¸ÀÔ
+    EWeaponType WeaponType; // ë¬´ê¸° íƒ€ì…
 };

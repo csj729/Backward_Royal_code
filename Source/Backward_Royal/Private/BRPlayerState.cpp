@@ -16,6 +16,7 @@ ABRPlayerState::ABRPlayerState()
 	bIsReady = false;
 	bIsLowerBody = true; // 기본값은 하체
 	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
+	UserUID = TEXT("");
 }
 
 void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -27,6 +28,7 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, bIsReady);
 	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
 	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
+	DOREPLIFETIME(ABRPlayerState, UserUID);
 }
 
 void ABRPlayerState::BeginPlay()
@@ -131,7 +133,11 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 
 void ABRPlayerState::OnRep_PlayerRole()
 {
-	// UI 업데이트를 위한 이벤트 발생 가능
+	// [핵심] 역할 변경 사실을 구독자(UI 등)에게 브로드캐스트
+	if (OnPlayerRoleChanged.IsBound())
+	{
+		OnPlayerRoleChanged.Broadcast(bIsLowerBody);
+	}
 }
 
 void ABRPlayerState::SwapControlWithPartner()
@@ -208,4 +214,46 @@ void ABRPlayerState::SwapControlWithPartner()
 		ApplyRoleSettings(MyPC, bIsLowerBody);
 		ApplyRoleSettings(PartnerPC, PartnerPS->bIsLowerBody);
 	}
+}
+
+FBRUserInfo ABRPlayerState::GetUserInfo() const
+{
+	FBRUserInfo UserInfo;
+	
+	UserInfo.UserUID = UserUID;
+	UserInfo.PlayerName = GetPlayerName();
+	UserInfo.TeamID = TeamNumber;
+	UserInfo.bIsHost = bIsHost;
+	UserInfo.bIsReady = bIsReady;
+	
+	// PlayerIndex는 GameState의 PlayerArray에서 찾기
+	if (UWorld* World = GetWorld())
+	{
+		if (ABRGameState* BRGameState = World->GetGameState<ABRGameState>())
+		{
+			// PlayerArray는 TArray<TObjectPtr<APlayerState>>이므로 FindByPredicate 사용
+			int32 FoundIndex = BRGameState->PlayerArray.IndexOfByPredicate([this](const TObjectPtr<APlayerState>& PS)
+			{
+				return PS.Get() == this;
+			});
+			UserInfo.PlayerIndex = FoundIndex;
+		}
+	}
+	
+	return UserInfo;
+}
+
+void ABRPlayerState::SetUserUID(const FString& NewUserUID)
+{
+	if (HasAuthority())
+	{
+		UserUID = NewUserUID;
+		UE_LOG(LogTemp, Log, TEXT("[UserUID 설정] %s: UserUID = %s"), *GetPlayerName(), *UserUID);
+		OnRep_UserUID();
+	}
+}
+
+void ABRPlayerState::OnRep_UserUID()
+{
+	// UI 업데이트를 위한 이벤트 발생 가능
 }

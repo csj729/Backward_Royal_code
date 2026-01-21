@@ -38,6 +38,8 @@ ABaseCharacter::ABaseCharacter()
 
     AttackComponent = CreateDefaultSubobject<UBRAttackComponent>(TEXT("AttackComponent"));
 
+    // PhysicsControlComp = CreateDefaultSubobject<UPhysicsControlComponent>(TEXT("PhysicsControlComp"));
+
     if (GetMesh())
     {
         // 1. 물리(Physics)와 쿼리(Query) 모두 활성화
@@ -73,6 +75,11 @@ void ABaseCharacter::BeginPlay()
     HandMesh->SetLeaderPoseComponent(GetMesh());
     LegMesh->SetLeaderPoseComponent(GetMesh());
     FootMesh->SetLeaderPoseComponent(GetMesh());
+
+    //if (PhysicsControlComp && GetMesh())
+    //{
+    //    SetupArmPhysicsControls();
+    //}
 
     if (GetCharacterMovement())
     {
@@ -145,89 +152,41 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 // [신규] 공격 요청 처리 함수
 void ABaseCharacter::RequestAttack()
 {
-    // 1. 무기가 있는 경우: 기존 로직(단타) 사용
+    // 1. 무기가 있는 경우: 기존 로직 유지
     if (CurrentWeapon)
     {
         UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
         if (AnimInstance && AttackMontage)
         {
-            // 이미 공격 몽타주가 재생 중이라면 입력을 무시하고 리턴
-            if (AnimInstance->Montage_IsPlaying(AttackMontage))
-            {
-                return;
-            }
+            if (AnimInstance->Montage_IsPlaying(AttackMontage)) return;
         }
-
-        // 무기 공격은 일단 콤보 없이 즉시 발동 (필요 시 무기 콤보도 유사하게 구현 가능)
-        MulticastPlayAttack(nullptr);
+        MulticastPlayWeaponAttack(nullptr);
         return;
     }
 
-    // 2. 맨손(Unarmed) 콤보 로직
-    if (bIsCharacterAttacking)
+    // 2. 맨손 공격 로직 (번갈아 치기)
+    UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+    if (!AnimInstance) return;
+
+    // [핵심] 현재 어떤 공격 몽타주라도 재생 중이면 입력을 무시
+    if (AnimInstance->Montage_IsPlaying(PunchMontage_L) ||
+        AnimInstance->Montage_IsPlaying(PunchMontage_R))
     {
-        // 이미 공격 중이라면 -> 입력 허용 구간(Window)일 때만 다음 공격 예약
-        if (bIsComboInputOn)
-        {
-            bIsNextComboReserved = true;
-            // GEngine->AddOnScreenDebugMessage(-1, 1.f, FColor::Green, TEXT("Combo Reserved!"));
-        }
+        return;
     }
-    else
+
+    // 재생할 손 결정
+    UAnimMontage* SelectedMontage = bNextAttackIsLeft ? PunchMontage_L : PunchMontage_R;
+
+    if (SelectedMontage)
     {
-        // 공격 중이 아니면 -> 1타 시작
-        CurrentComboIndex = 1;
-        bIsCharacterAttacking = true;
-        bIsNextComboReserved = false;
-        MulticastPlayUnarmedCombo(CurrentComboIndex);
-    }
-}
+        MulticastPlayPunch(SelectedMontage);
 
-// [신규] 맨손 콤보 몽타주 재생 (멀티캐스트)
-void ABaseCharacter::MulticastPlayUnarmedCombo_Implementation(int32 SectionIndex)
-{
-    if (UnarmedComboMontage && GetMesh() && GetMesh()->GetAnimInstance())
-    {
-        UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+        // [2025-11-18] 커스텀 디버그 로그 매크로 사용 (규칙 준수)
+        CHAR_LOG(Log, TEXT("Starting Punch: %s"), bNextAttackIsLeft ? TEXT("Left") : TEXT("Right"));
 
-        if (!AnimInstance->Montage_IsPlaying(UnarmedComboMontage))
-        {
-            AnimInstance->Montage_Play(UnarmedComboMontage);
-        }
-
-        // 섹션 이름 (Combo1, Combo2, Combo3...)
-        FName SectionName = FName(*FString::Printf(TEXT("Combo%d"), SectionIndex));
-        AnimInstance->Montage_JumpToSection(SectionName, UnarmedComboMontage);
-    }
-}
-
-// [신규] 애니메이션 노티파이: 입력 구간 설정
-void ABaseCharacter::SetComboInputWindow(bool bEnable)
-{
-    bIsComboInputOn = bEnable;
-}
-
-// [신규] 애니메이션 노티파이: 다음 콤보 진행 여부 체크
-void ABaseCharacter::CheckNextCombo()
-{
-    if (bIsNextComboReserved)
-    {
-        // 예약된 공격이 있으면 -> 다음 콤보
-        bIsNextComboReserved = false;
-        bIsComboInputOn = false;
-
-        CurrentComboIndex++;
-        if (CurrentComboIndex > MaxComboCount) CurrentComboIndex = 1;
-
-        MulticastPlayUnarmedCombo(CurrentComboIndex);
-    }
-    else
-    {
-        // 예약 없으면 -> 공격 종료
-        bIsCharacterAttacking = false;
-        bIsComboInputOn = false;
-        CurrentComboIndex = 0;
-        // 몽타주는 BlendOut 되도록 둠
+        // 다음 손으로 변경
+        bNextAttackIsLeft = !bNextAttackIsLeft;
     }
 }
 
@@ -294,6 +253,8 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
     CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
 
+    UpdateHPUI();
+
     if (CurrentHP <= 0.0f) Die();
 
     return ActualDamage;
@@ -333,9 +294,6 @@ void ABaseCharacter::MulticastDie_Implementation()
         // 1. 메쉬와의 연결을 끊거나
         PhysAnimComp->SetSkeletalMeshComponent(nullptr);
 
-        //// 2. 아예 컴포넌트를 꺼버립니다.
-        //PhysAnimComp->Deactivate();
-
         CHAR_LOG(Log, TEXT("Physical Animation Disabled for Ragdoll."));
     }
 
@@ -352,10 +310,22 @@ void ABaseCharacter::MulticastDie_Implementation()
     OnDeath.Broadcast();
 }
 
+void ABaseCharacter::UpdateHPUI()
+{
+    // [2025-11-18] 커스텀 로그 매크로 사용
+    CHAR_LOG(Log, TEXT("HP 변경됨: %.1f / %.1f"), CurrentHP, MaxHP);
+
+    if (OnHPChanged.IsBound())
+    {
+        OnHPChanged.Broadcast(CurrentHP, MaxHP);
+    }
+}
+
 void ABaseCharacter::OnRep_CurrentHP()
 {
     // 이 함수는 서버에서 CurrentHP 변수가 변경되어 클라이언트로 복제될 때 실행됩니다.
     // 보통 여기에서 체력 바(UI)를 업데이트하는 로직을 넣습니다.
+    UpdateHPUI();
 
     if (CurrentHP <= 0.0f)
     {
@@ -366,14 +336,16 @@ void ABaseCharacter::OnRep_CurrentHP()
     CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);
 }
 
-void ABaseCharacter::MulticastPlayAttack_Implementation(APawn* RequestingPawn)
+void ABaseCharacter::MulticastPlayWeaponAttack_Implementation(APawn* RequestingPawn)
 {
     if (AttackMontage && GetMesh())
     {
         UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
         if (AnimInstance)
         {
-            AnimInstance->Montage_Play(AttackMontage);
+            float AttackSpeed = AttackComponent->GetCalculatedAttackSpeed();
+
+            AnimInstance->Montage_Play(AttackMontage, AttackSpeed);
 
             // 전달받은 Pawn을 UpperBodyPawn으로 캐스팅
             if (AUpperBodyPawn* UpperPawn = Cast<AUpperBodyPawn>(RequestingPawn))
@@ -384,5 +356,31 @@ void ABaseCharacter::MulticastPlayAttack_Implementation(APawn* RequestingPawn)
                 AnimInstance->Montage_SetEndDelegate(EndDelegate, AttackMontage);
             }
         }
+    }
+}
+
+void ABaseCharacter::MulticastPlayPunch_Implementation(UAnimMontage* TargetMontage)
+{
+    if (TargetMontage && GetMesh())
+    {
+        UAnimInstance* AnimInstance = GetMesh()->GetAnimInstance();
+        if (AnimInstance)
+        {
+            float AttackSpeed = AttackComponent->GetCalculatedAttackSpeed();
+            AnimInstance->Montage_Play(TargetMontage, AttackSpeed);
+        }
+    }
+}
+
+// 공격 시작 시 호출 (AnimNotify 등에서 활용)
+void ABaseCharacter::EnhanceFistPhysics(bool bEnable)
+{
+    // 팔 관련 본들의 이름을 배열로 관리하여 적용
+    TArray<FName> RootArmBones = { TEXT("lowerarm_r"), TEXT("lowerarm_l") };
+    for (const FName& BoneName : RootArmBones)
+    {
+        // 세 번째 인자인 bIncludeSelf를 true로 설정하여 upperarm 자체도 포함시킵니다.
+        if(bEnable) GetMesh()->SetAllBodiesBelowSimulatePhysics(BoneName, false, true);
+        else GetMesh()->SetAllBodiesBelowSimulatePhysics(BoneName, true, true);
     }
 }

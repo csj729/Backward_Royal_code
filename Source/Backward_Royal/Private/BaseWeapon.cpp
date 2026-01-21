@@ -10,6 +10,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogBaseWeapon, Display, All);
     UE_LOG(LogBaseWeapon, Verbosity, TEXT("%s - %s"), *FString(__FUNCTION__), *FString::Printf(TEXT(Format), ##__VA_ARGS__))
 
 // static 변수 초기화 (기본값 1.0)
+
 float ABaseWeapon::GlobalDamageMultiplier = 1.0f;
 float ABaseWeapon::GlobalImpulseMultiplier = 1.0f;
 float ABaseWeapon::GlobalAttackSpeedMultiplier = 1.0f;
@@ -32,9 +33,6 @@ ABaseWeapon::ABaseWeapon()
 
     bIsEquipped = false;
     GripSocketName = TEXT("Grip");
-    DamageCoefficient = 1.0f;
-    ImpulseCoefficient = 1.0f;
-    AttackSpeedCoefficient = 1.0f;
 
     bReplicates = true;
     AActor::SetReplicateMovement(true);
@@ -88,16 +86,14 @@ void ABaseWeapon::LoadWeaponData()
 
 void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
 {
-    float FinalDamage = GetFinalDamage();
-
-    LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Damage: %f, Mass: %f",
-        *WeaponRowName.ToString(), NewStats.BaseDamage, NewStats.MassKg);
+    //LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Mass: %f",
+    //    *WeaponRowName.ToString(), NewStats.MassKg);
 
     // 화면에 즉시 표시 (디버깅용)
     if (GEngine)
     {
-        FString DebugMsg = FString::Printf(TEXT("Weapon: %s | Damage: %.1f | Mass: %.1f"),
-            *WeaponRowName.ToString(), NewStats.BaseDamage, NewStats.MassKg);
+        FString DebugMsg = FString::Printf(TEXT("Weapon: %s | Mass: %.1f"),
+            *WeaponRowName.ToString(), NewStats.MassKg);
         GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, DebugMsg);
     }
 

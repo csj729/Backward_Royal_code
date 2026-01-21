@@ -200,3 +200,35 @@ void ABRGameState::OnRep_CanStartGame()
 	// UI 업데이트를 위한 이벤트 발생 가능
 }
 
+TArray<FBRUserInfo> ABRGameState::GetAllPlayerUserInfo() const
+{
+	TArray<FBRUserInfo> UserInfoArray;
+	
+	for (int32 i = 0; i < PlayerArray.Num(); i++)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+		{
+			FBRUserInfo UserInfo = BRPS->GetUserInfo();
+			UserInfo.PlayerIndex = i; // PlayerArray에서의 인덱스 설정
+			UserInfoArray.Add(UserInfo);
+		}
+	}
+	
+	return UserInfoArray;
+}
+
+FBRUserInfo ABRGameState::GetPlayerUserInfo(int32 PlayerIndex) const
+{
+	FBRUserInfo UserInfo;
+	
+	if (PlayerIndex >= 0 && PlayerIndex < PlayerArray.Num())
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[PlayerIndex]))
+		{
+			UserInfo = BRPS->GetUserInfo();
+			UserInfo.PlayerIndex = PlayerIndex;
+		}
+	}
+	
+	return UserInfo;
+}

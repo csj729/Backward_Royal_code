@@ -99,6 +99,7 @@ void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 
 	// 조건 없이 모든 클라이언트(주인 포함)에게 복제되도록 수정
 	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
+	DOREPLIFETIME(APlayerCharacter, CurrentStamina);
 }
 
 void APlayerCharacter::Restart()
@@ -210,4 +211,27 @@ FRotator APlayerCharacter::GetBaseAimRotation() const
 	// 원래는 컨트롤러(하체 플레이어)의 회전을 가져오지만,
 	// 우리는 상체 플레이어가 정해준 회전값(UpperBodyAimRotation)을 강제로 리턴합니다.
 	return UpperBodyAimRotation;
+}
+
+void APlayerCharacter::UpdateStaminaUI()
+{
+	if (OnStaminaChanged.IsBound())
+	{
+		OnStaminaChanged.Broadcast(CurrentStamina, MaxStamina);
+	}
+}
+
+void APlayerCharacter::OnRep_CurrentStamina()
+{
+	// 이 함수는 서버에서 CurrentHP 변수가 변경되어 클라이언트로 복제될 때 실행됩니다.
+	// 보통 여기에서 체력 바(UI)를 업데이트하는 로직을 넣습니다.
+	UpdateStaminaUI();
+
+	if (CurrentStamina <= 0.0f)
+	{
+		// 스태미나 소비 행동 잠금
+		return;
+	}
+
+	CHAR_LOG(Log, TEXT("스태미나가 복제되었습니다. 현재 스태미나 : %.1f"), CurrentStamina);
 }

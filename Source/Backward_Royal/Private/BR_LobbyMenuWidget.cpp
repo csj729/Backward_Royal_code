@@ -1,0 +1,202 @@
+// BR_LobbyMenuWidget.cpp
+#include "BR_LobbyMenuWidget.h"
+#include "BRPlayerController.h"
+#include "BRGameState.h"
+#include "BRPlayerState.h"
+#include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+
+UBR_LobbyMenuWidget::UBR_LobbyMenuWidget(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+	, CachedPlayerController(nullptr)
+	, CachedGameState(nullptr)
+{
+}
+
+void UBR_LobbyMenuWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	// PlayerController 캐시
+	CachedPlayerController = GetBRPlayerController();
+
+	// GameState 캐시 및 이벤트 바인딩
+	CachedGameState = GetBRGameState();
+	if (CachedGameState)
+	{
+		CachedGameState->OnPlayerListChanged.AddDynamic(this, &UBR_LobbyMenuWidget::HandlePlayerListChanged);
+		CachedGameState->OnTeamChanged.AddDynamic(this, &UBR_LobbyMenuWidget::HandleTeamChanged);
+		
+		// 초기 게임 시작 가능 여부 확인
+		HandleCanStartGameChanged();
+	}
+}
+
+void UBR_LobbyMenuWidget::NativeDestruct()
+{
+	// 이벤트 바인딩 해제
+	if (CachedGameState)
+	{
+		CachedGameState->OnPlayerListChanged.RemoveDynamic(this, &UBR_LobbyMenuWidget::HandlePlayerListChanged);
+		CachedGameState->OnTeamChanged.RemoveDynamic(this, &UBR_LobbyMenuWidget::HandleTeamChanged);
+	}
+
+	Super::NativeDestruct();
+}
+
+void UBR_LobbyMenuWidget::ToggleReady()
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 준비 상태 토글 요청"));
+		BRPC->ToggleReady();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
+void UBR_LobbyMenuWidget::RequestRandomTeams()
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 랜덤 팀 배정 요청"));
+		BRPC->RandomTeams();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
+void UBR_LobbyMenuWidget::ChangePlayerTeam(int32 PlayerIndex, int32 TeamNumber)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 팀 변경 요청: PlayerIndex=%d, TeamNumber=%d"), PlayerIndex, TeamNumber);
+		BRPC->ChangeTeam(PlayerIndex, TeamNumber);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
+void UBR_LobbyMenuWidget::RequestStartGame()
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 게임 시작 요청"));
+		BRPC->StartGame();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
+ABRPlayerController* UBR_LobbyMenuWidget::GetBRPlayerController() const
+{
+	if (CachedPlayerController && IsValid(CachedPlayerController))
+	{
+		return CachedPlayerController;
+	}
+
+	// 캐시가 없거나 유효하지 않으면 새로 가져오기
+	if (UWorld* World = GetWorld())
+	{
+		if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+		{
+			CachedPlayerController = Cast<ABRPlayerController>(PC);
+			return CachedPlayerController;
+		}
+	}
+
+	return nullptr;
+}
+
+ABRGameState* UBR_LobbyMenuWidget::GetBRGameState() const
+{
+	if (CachedGameState && IsValid(CachedGameState))
+	{
+		return CachedGameState;
+	}
+
+	// 캐시가 없거나 유효하지 않으면 새로 가져오기
+	if (UWorld* World = GetWorld())
+	{
+		CachedGameState = World->GetGameState<ABRGameState>();
+		return CachedGameState;
+	}
+
+	return nullptr;
+}
+
+ABRPlayerState* UBR_LobbyMenuWidget::GetBRPlayerState() const
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		return BRPC->GetPlayerState<ABRPlayerState>();
+	}
+
+	return nullptr;
+}
+
+bool UBR_LobbyMenuWidget::IsHost() const
+{
+	if (ABRPlayerState* BRPS = GetBRPlayerState())
+	{
+		return BRPS->bIsHost;
+	}
+
+	return false;
+}
+
+bool UBR_LobbyMenuWidget::IsReady() const
+{
+	if (ABRPlayerState* BRPS = GetBRPlayerState())
+	{
+		return BRPS->bIsReady;
+	}
+
+	return false;
+}
+
+void UBR_LobbyMenuWidget::HandlePlayerListChanged()
+{
+	// 블루프린트 이벤트 호출
+	OnPlayerListChanged();
+}
+
+void UBR_LobbyMenuWidget::HandleTeamChanged()
+{
+	// 블루프린트 이벤트 호출
+	OnTeamChanged();
+}
+
+void UBR_LobbyMenuWidget::HandleCanStartGameChanged()
+{
+	// GameState에서 게임 시작 가능 여부 가져오기
+	if (CachedGameState)
+	{
+		OnCanStartGameChanged(CachedGameState->bCanStartGame);
+	}
+}
+
+// NativeTick를 사용하여 주기적으로 게임 시작 가능 여부 확인
+void UBR_LobbyMenuWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+
+	// GameState의 bCanStartGame이 변경되었는지 확인
+	if (CachedGameState)
+	{
+		static bool bLastCanStartGame = false;
+		if (bLastCanStartGame != CachedGameState->bCanStartGame)
+		{
+			bLastCanStartGame = CachedGameState->bCanStartGame;
+			HandleCanStartGameChanged();
+		}
+	}
+}
