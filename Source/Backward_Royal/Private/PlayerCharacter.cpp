@@ -53,6 +53,7 @@ APlayerCharacter::APlayerCharacter()
 	bReplicates = true;
 	NetUpdateFrequency = 144.0f;
 	MinNetUpdateFrequency = 100.0f;
+	CurrentStamina = MaxStamina;
 
 	GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
 }

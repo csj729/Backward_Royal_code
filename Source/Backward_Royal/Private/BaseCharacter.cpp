@@ -253,6 +253,8 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
     CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
 
+    UpdateHPUI();
+
     if (CurrentHP <= 0.0f) Die();
 
     return ActualDamage;
@@ -327,6 +329,8 @@ void ABaseCharacter::OnRep_CurrentHP()
         // 사망 처리 등 클라이언트 측 가시적 효과가 필요하다면 여기서 호출 가능
         // Die(); 
     }
+
+    CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);
 }
 
 void ABaseCharacter::MulticastPlayWeaponAttack_Implementation(APawn* RequestingPawn)

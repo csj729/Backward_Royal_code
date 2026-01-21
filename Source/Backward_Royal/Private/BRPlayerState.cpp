@@ -133,10 +133,7 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 
 void ABRPlayerState::OnRep_PlayerRole()
 {
-	if (OnPlayerRoleChanged.IsBound())
-	{
-		OnPlayerRoleChanged.Broadcast(bIsLowerBody);
-	}
+	// UI 업데이트를 위한 이벤트 발생 가능
 }
 
 void ABRPlayerState::SwapControlWithPartner()
