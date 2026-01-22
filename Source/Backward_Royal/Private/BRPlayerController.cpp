@@ -59,6 +59,28 @@ void ABRPlayerController::BeginPlay()
 	}
 }
 
+// 서버: 내가 누군가에게 빙의했을 때
+void ABRPlayerController::OnPossess(APawn* aPawn)
+{
+	Super::OnPossess(aPawn);
+
+	if (OnPawnChanged.IsBound())
+	{
+		OnPawnChanged.Broadcast(aPawn);
+	}
+}
+
+// 클라이언트: 네트워크를 통해 내 폰 정보가 갱신되었을 때
+void ABRPlayerController::OnRep_Pawn()
+{
+	Super::OnRep_Pawn();
+
+	if (OnPawnChanged.IsBound())
+	{
+		OnPawnChanged.Broadcast(GetPawn());
+	}
+}
+
 void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// 네트워크 연결 실패 델리게이트 언바인딩

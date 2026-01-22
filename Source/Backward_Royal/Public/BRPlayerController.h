@@ -5,6 +5,8 @@
 #include "GameFramework/PlayerController.h"
 #include "BRPlayerController.generated.h"
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPawnChanged, APawn*, NewPawn);
+
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerController : public APlayerController
 {
@@ -89,9 +91,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	class UUserWidget* GetCurrentMenuWidget() const { return CurrentMenuWidget; }
 
+	// 위젯이 이 이벤트 감지
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnPawnChanged OnPawnChanged;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	// 서버에서 빙의했을 때 호출됨
+	virtual void OnPossess(APawn* aPawn) override;
+
+	// 클라이언트에서 폰 정보가 복제되었을 때 호출됨
+	virtual void OnRep_Pawn() override;
 	
 	// 네트워크 연결 실패 감지
 	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);

@@ -14,7 +14,7 @@ DEFINE_LOG_CATEGORY(LogPlayerChar);
 
 APlayerCharacter::APlayerCharacter()
 {
-	// [조작 설정] 탱크/말 방식 (몸통 회전 O, 이동 방향 회전 X)
+	// [기본 설정 유지]
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
 	bUseControllerRotationRoll = false;
@@ -25,12 +25,10 @@ APlayerCharacter::APlayerCharacter()
 	GetMesh()->SetOwnerNoSee(true);
 	GetMesh()->bCastHiddenShadow = true;
 
-	// 1. 후방 카메라 설정 (Player B)
+	// 1. 카메라 설정
 	RearCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("RearCameraBoom"));
 	RearCameraBoom->SetupAttachment(RootComponent);
-	RearCameraBoom->TargetArmLength = 0.0f; // 1인칭 느낌
-
-	// 말 운전자는 시점 고정 (컨트롤러 회전 안 따라감)
+	RearCameraBoom->TargetArmLength = 0.0f;
 	RearCameraBoom->bUsePawnControlRotation = false;
 	RearCameraBoom->SetRelativeRotation(FRotator(0.0f, 0.0f, 0.0f));
 
@@ -38,32 +36,32 @@ APlayerCharacter::APlayerCharacter()
 	RearCamera->SetupAttachment(RearCameraBoom, USpringArmComponent::SocketName);
 	RearCamera->bUsePawnControlRotation = false;
 
-	// 2. 상체(Player A) 부착 지점 생성
+	// 2. 상체 부착 지점
 	HeadMountPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HeadMountPoint"));
-
-	// [오류 해결됨] 이제 캡슐 컴포넌트 헤더가 있어서 정상적으로 붙습니다.
 	HeadMountPoint->SetupAttachment(GetCapsuleComponent());
-
-	// 캡슐 중앙(배꼽)에서 눈높이(Z +65)만큼 위로 올림
 	HeadMountPoint->SetRelativeLocation(FVector(0.0f, 0.0f, 65.0f));
 
-	// =================================================================
-	// [네트워크] 업데이트 빈도 증가
-	// =================================================================
+	// 3. [신규] 스태미나 컴포넌트 생성
+	StaminaComp = CreateDefaultSubobject<UStaminaComponent>(TEXT("StaminaComp"));
+
+	// [네트워크]
 	bReplicates = true;
 	NetUpdateFrequency = 144.0f;
 	MinNetUpdateFrequency = 100.0f;
-	CurrentStamina = MaxStamina;
 
 	GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
 }
 
 void APlayerCharacter::BeginPlay()
 {
+	if (StaminaComp)
+	{
+		StaminaComp->OnStaminaChanged.AddDynamic(this, &APlayerCharacter::HandleStaminaChanged);
+		StaminaComp->OnSprintStateChanged.AddDynamic(this, &APlayerCharacter::HandleSprintStateChanged);
+	}
+
 	Super::BeginPlay();
 
-	// [추가] 서버 권한이 있을 때, 시작 시점의 상체 회전을 현재 몸통 회전으로 초기화
-	// 이 코드가 없으면 스폰 직후에 고개가 (0,0,0) 북쪽을 보며 꺾여있을 수 있습니다.
 	if (HasAuthority())
 	{
 		UpperBodyAimRotation = GetActorRotation();
@@ -82,98 +80,80 @@ void APlayerCharacter::BeginPlay()
 	}
 }
 
-void APlayerCharacter::PossessedBy(AController* NewController)
-{
-	Super::PossessedBy(NewController);
-
-	// [서버 권한] 이동 모드 초기화 및 물리 상태 활성화
-	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
-	{
-		MoveComp->SetMovementMode(MOVE_Walking);
-		MoveComp->Activate();
-	}
-}
-
-void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// 조건 없이 모든 클라이언트(주인 포함)에게 복제되도록 수정
-	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
-	DOREPLIFETIME(APlayerCharacter, CurrentStamina);
-}
-
-void APlayerCharacter::Restart()
-{
-	Super::Restart();
-
-	// 클라이언트에서 컨트롤러 할당이 완료된 직후 호출됨
-	if (IsLocallyControlled())
-	{
-		// 입력 컴포넌트가 있다면 바인딩 로직을 다시 실행하여 함수 연결
-		if (InputComponent)
-		{
-			SetupPlayerInputComponent(InputComponent);
-		}
-
-		UE_LOG(LogTemp, Warning, TEXT("재설정"));
-	}
-}
-
-void APlayerCharacter::OnRep_PlayerState()
-{
-	Super::OnRep_PlayerState();
-
-	// PlayerState가 복제되어 들어왔을 때 (컨트롤러 소유권 확인 시점)
-	if (IsLocallyControlled())
-	{
-		if (InputComponent)
-		{
-			SetupPlayerInputComponent(InputComponent);
-			UE_LOG(LogTemp, Warning, TEXT("OnRep_PlayerState를 통해 입력 바인딩 재설정"));
-		}
-
-		if (ABRPlayerController* PC = Cast<ABRPlayerController>(GetController()))
-		{
-			PC->SetupRoleInput(true); // 하체용 IMC 강제 로드
-		}
-	}
-}
-
 void APlayerCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
-	if (!PlayerInputComponent) return;
-
-	// 기존 바인딩 초기화 (안전을 위해 유지)
-	PlayerInputComponent->ClearActionBindings();
-
+	// 부모 클래스 호출 (안전을 위해)
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
 	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(PlayerInputComponent))
 	{
-		// [기존 코드 유지] 이동
+		// Move, Look, Jump 등 기존 바인딩 유지
 		if (MoveAction)
 			EnhancedInputComponent->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Move);
 
-		// [기존 코드 유지] 시선
 		if (LookAction)
 			EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerCharacter::Look);
 
-		// [기존 코드 유지] 점프
 		if (JumpAction)
 		{
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Started, this, &ACharacter::Jump);
 			EnhancedInputComponent->BindAction(JumpAction, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
 		}
 
-		// [새로 추가된 코드] 달리기 (Sprint)
+		// [수정] 달리기
 		if (SprintAction)
 		{
-			// 눌렀을 때 -> 빨라짐
 			EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Started, this, &APlayerCharacter::SprintStart);
-			// 뗐을 때 -> 느려짐
 			EnhancedInputComponent->BindAction(SprintAction, ETriggerEvent::Completed, this, &APlayerCharacter::SprintEnd);
 		}
+	}
+}
+
+// [수정] 컴포넌트에 달리기 요청
+void APlayerCharacter::SprintStart(const FInputActionValue& Value)
+{
+	if (StaminaComp)
+	{
+		StaminaComp->ServerSetSprinting(true);
+
+	}
+}
+
+// [수정] 컴포넌트에 멈춤 요청
+void APlayerCharacter::SprintEnd(const FInputActionValue& Value)
+{
+	if (StaminaComp)
+	{
+		StaminaComp->ServerSetSprinting(false);
+	}
+}
+
+// [신규] 컴포넌트가 "달리기 상태 변경"을 알릴 때 호출됨
+void APlayerCharacter::HandleSprintStateChanged(bool bCanSprint)
+{
+	// 스태미나가 바닥나서 bCanSprint가 false로 오거나, 
+	// 다시 회복되어 true로 올 수 있음.
+	// 하지만 여기서는 "현재 달리고 있는가"에 대한 결과에 따라 속도를 맞춥니다.
+
+	// StaminaComponent 로직에 따라 bIsSprinting 상태를 확인하여 속도 적용
+	// (단, 여기서는 파라미터를 단순화해서 bCanSprint가 false면 걷게 함)
+
+	if (StaminaComp && StaminaComp->bIsSprinting)
+	{
+		GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
+	}
+	else
+	{
+		GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
+	}
+}
+
+// [신규] 컴포넌트 스태미나 변화 -> 캐릭터 델리게이트로 중계 -> 위젯이 수신
+void APlayerCharacter::HandleStaminaChanged(float CurrentVal, float MaxVal)
+{
+	if (OnStaminaChanged.IsBound())
+	{
+		OnStaminaChanged.Broadcast(CurrentVal, MaxVal);
 	}
 }
 
@@ -183,24 +163,13 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
-		// 1. 컨트롤러의 회전값 중 Yaw(수평 회전)만 가져옵니다.
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-		// 2. 전방(Forward) 벡터 구하기 (W/S 이동용)
-		// EAxis::X 는 앞쪽 방향을 의미합니다.
 		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-
-		// 3. 우측(Right) 벡터 구하기 (A/D 이동용) [새로 추가된 부분]
-		// EAxis::Y 는 오른쪽 방향을 의미합니다.
 		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		// 4. 입력값 적용
-		// W/S 입력(MovementVector.Y)은 앞뒤 벡터에 적용
 		AddMovementInput(ForwardDirection, MovementVector.Y);
-
-		// A/D 입력(MovementVector.X)은 좌우 벡터에 적용
-		// 기존의 AddControllerYawInput(회전) 대신 AddMovementInput(이동)을 사용합니다.
 		AddMovementInput(RightDirection, MovementVector.X);
 	}
 }
@@ -222,38 +191,49 @@ void APlayerCharacter::SetUpperBodyRotation(FRotator NewRotation)
 
 FRotator APlayerCharacter::GetBaseAimRotation() const
 {
-	// 원래는 컨트롤러(하체 플레이어)의 회전을 가져오지만,
-	// 우리는 상체 플레이어가 정해준 회전값(UpperBodyAimRotation)을 강제로 리턴합니다.
 	return UpperBodyAimRotation;
 }
 
-void APlayerCharacter::SprintStart(const FInputActionValue& Value)
+void APlayerCharacter::PossessedBy(AController* NewController)
 {
-	// 캐릭터 무브먼트의 최대 속도를 달리기 속도로 변경
-	GetCharacterMovement()->MaxWalkSpeed = SprintSpeed;
-}
-
-void APlayerCharacter::SprintEnd(const FInputActionValue& Value)
-{
-	// 키를 떼면 다시 걷기 속도로 복구
-	GetCharacterMovement()->MaxWalkSpeed = WalkSpeed;
-}
-
-void APlayerCharacter::UpdateStaminaUI()
-{
-	if (OnStaminaChanged.IsBound())
+	Super::PossessedBy(NewController);
+	if (UCharacterMovementComponent* MoveComp = GetCharacterMovement())
 	{
-		OnStaminaChanged.Broadcast(CurrentStamina, MaxStamina);
+		MoveComp->SetMovementMode(MOVE_Walking);
+		MoveComp->Activate();
 	}
 }
 
-void APlayerCharacter::OnRep_CurrentStamina()
+void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
-	UpdateStaminaUI();
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
+}
 
-	if (CurrentStamina <= 0.0f)
+void APlayerCharacter::Restart()
+{
+	Super::Restart();
+	if (IsLocallyControlled())
 	{
-		// 스태미나 소비 행동 잠금
-		return;
+		if (InputComponent)
+		{
+			SetupPlayerInputComponent(InputComponent);
+		}
+	}
+}
+
+void APlayerCharacter::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+	if (IsLocallyControlled())
+	{
+		if (InputComponent)
+		{
+			SetupPlayerInputComponent(InputComponent);
+		}
+		if (ABRPlayerController* PC = Cast<ABRPlayerController>(GetController()))
+		{
+			PC->SetupRoleInput(true);
+		}
 	}
 }

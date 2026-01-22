@@ -63,7 +63,7 @@ public:
 	UFUNCTION()
 	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	class APlayerCharacter* ParentBodyCharacter;
 
 	UFUNCTION(Server, Unreliable) // 자주 호출되므로 Unreliable 권장
