@@ -14,6 +14,8 @@
 #include "BaseWeapon.h"
 #include "GlobalBalanceData.h"
 #include "UObject/Package.h"
+#include "PlayerCharacter.h"
+#include "StaminaComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "GameFramework/GameModeBase.h"
 
@@ -425,26 +427,51 @@ void UBRGameInstance::SaveDataTableToAsset(UDataTable* TargetTable)
 #endif
 }
 
+// BRGameInstance.cpp 의 ApplyGlobalMultipliers 함수 수정
+#include "StaminaComponent.h" // 헤더 추가 필수
+
 void UBRGameInstance::ApplyGlobalMultipliers()
 {
-	// ConfigDataMap에서 "GlobalSettings"라는 키로 테이블을 찾아옵니다.
 	if (UDataTable** TargetTablePtr = ConfigDataMap.Find(TEXT("GlobalSettings")))
 	{
 		UDataTable* GlobalTable = *TargetTablePtr;
 		if (GlobalTable)
 		{
-			// 글로벌 설정은 "Default"라는 이름의 단일 행으로 관리합니다.
 			static const FString ContextString(TEXT("Global Settings Context"));
 			FGlobalBalanceData* FoundData = GlobalTable->FindRow<FGlobalBalanceData>(FName("Default"), ContextString);
 
 			if (FoundData)
 			{
-				// ABaseWeapon의 static 변수 갱신
+				// 1. 무기 관련 전역 변수 업데이트
 				ABaseWeapon::GlobalDamageMultiplier = FoundData->Global_Weapon_DamageMultiplier;
 				ABaseWeapon::GlobalImpulseMultiplier = FoundData->Global_Weapon_ImpulseMultiplier;
 				ABaseWeapon::GlobalAttackSpeedMultiplier = FoundData->Global_Weapon_AttackSpeedMultiplier;
 
-				GI_LOG(Display, TEXT("Global Multipliers Updated: Dmg(%.2f), Imp(%.2f), Spd(%.2f)"),
+				// 2. 스태미나 관련 전역(static) 변수 업데이트
+				UStaminaComponent::Global_SprintDrainRate = FoundData->Global_Stamina_SprintDrainRate;
+				UStaminaComponent::Global_JumpCost = FoundData->Global_Stamina_JumpCost;
+				UStaminaComponent::Global_RegenRate = FoundData->Global_Stamina_RegenRate;
+
+				// 3. (핵심) 이미 소환된 캐릭터들에게도 즉시 적용 (실시간 리로드를 위해)
+				if (UWorld* World = GetWorld())
+				{
+					for (TActorIterator<APlayerCharacter> It(World); It; ++It)
+					{
+						if (UStaminaComponent* StaminaComp = It->StaminaComp)
+						{
+							StaminaComp->StaminaDrainRate = UStaminaComponent::Global_SprintDrainRate;
+							StaminaComp->JumpCost = UStaminaComponent::Global_JumpCost;
+							StaminaComp->StaminaRegenRate = UStaminaComponent::Global_RegenRate;
+						}
+					}
+				}
+
+				GI_LOG(Display, TEXT("스태미나 세팅 적용. Stamina: Drain(%.1f), Jump(%.1f), Regen(%.1f)"),
+					UStaminaComponent::Global_SprintDrainRate,
+					UStaminaComponent::Global_JumpCost,
+					UStaminaComponent::Global_RegenRate);
+
+				GI_LOG(Display, TEXT("무기 배율 세팅 적용. Weapon: Damage(%.1f), Impulse(%.1f), AttackSpeed(%.1f)"),
 					ABaseWeapon::GlobalDamageMultiplier,
 					ABaseWeapon::GlobalImpulseMultiplier,
 					ABaseWeapon::GlobalAttackSpeedMultiplier);

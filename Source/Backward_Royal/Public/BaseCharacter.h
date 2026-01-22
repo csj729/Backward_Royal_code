@@ -51,9 +51,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat")
     UBRAttackComponent* AttackComponent;
 
-    //UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Physics")
-    //UPhysicsControlComponent* PhysicsControlComp;
-
     // --- Stats ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float DefaultWalkSpeed;
@@ -104,7 +101,6 @@ public:
 
     UFUNCTION(BlueprintCallable)
     void EnhanceFistPhysics(bool bEnable);
-
 
     // 데미지 처리
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;

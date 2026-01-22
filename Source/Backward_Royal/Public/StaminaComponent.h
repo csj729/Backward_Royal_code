@@ -18,6 +18,10 @@ class BACKWARD_ROYAL_API UStaminaComponent : public UActorComponent
 public:
     UStaminaComponent();
 
+    static float Global_SprintDrainRate;
+    static float Global_JumpCost;
+    static float Global_RegenRate;
+
 protected:
     virtual void BeginPlay() override;
     virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
@@ -27,6 +31,14 @@ public:
     // [서버] 달리기 요청 처리
     UFUNCTION(BlueprintCallable, Server, Reliable)
     void ServerSetSprinting(bool bNewSprinting);
+
+    // 점프 시 스태미나 소모
+    UFUNCTION(BlueprintCallable)
+    void ConsumeJumpStamina();
+
+    // 현재 스태미나가 충분한지 확인
+    UFUNCTION(BlueprintCallable)
+    bool CanJump() const { return CurrentStamina >= JumpCost; }
 
     // 현재 스태미나 비율 반환 (0.0 ~ 1.0)
     UFUNCTION(BlueprintCallable)
@@ -40,10 +52,13 @@ public:
     float CurrentStamina;
 
     UPROPERTY(EditAnywhere, Category = "Stamina")
-    float StaminaDrainRate = 20.0f;
+    float StaminaDrainRate;
 
     UPROPERTY(EditAnywhere, Category = "Stamina")
-    float StaminaRegenRate = 10.0f;
+    float StaminaRegenRate;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stamina")
+    float JumpCost;
 
     UPROPERTY(ReplicatedUsing = OnRep_IsSprinting, VisibleAnywhere, BlueprintReadOnly, Category = "Stamina")
     bool bIsSprinting = false;

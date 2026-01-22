@@ -30,6 +30,13 @@ protected:
 	// --- Input Functions ---
 	void Move(const FInputActionValue& Value);
 	void Look(const FInputActionValue& Value);
+	virtual void Jump() override;
+
+	// 엔진이 "점프 가능 여부"를 물어볼 때 스태미나도 체크하도록 오버라이드
+	virtual bool CanJumpInternal_Implementation() const override;
+
+	// 실제로 점프가 발생했을 때 호출되는 함수 오버라이드
+	virtual void OnJumped_Implementation() override;
 
 	// [수정] 입력 함수가 컴포넌트를 호출하도록 변경
 	void SprintStart(const FInputActionValue& Value);
