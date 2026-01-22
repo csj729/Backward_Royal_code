@@ -14,6 +14,7 @@ DEFINE_LOG_CATEGORY(LogPlayerChar);
 
 APlayerCharacter::APlayerCharacter()
 {
+	PrimaryActorTick.bCanEverTick = true;
 	// [기본 설정 유지]
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -77,6 +78,32 @@ void APlayerCharacter::BeginPlay()
 				Subsystem->AddMappingContext(DefaultMappingContext, 0);
 			}
 		}
+	}
+}
+
+// 회전값 동기화 수행
+void APlayerCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// 로컬 플레이어(내가 조종하는 캐릭터)인 경우에만 실행
+	if (IsLocallyControlled())
+	{
+		FRotator NewRot = GetControlRotation();
+
+		// 내 화면에서는 즉시 적용 (렉 없음)
+		UpperBodyAimRotation = NewRot;
+
+		// 서버로 전송 (네트워크 대역폭 절약을 위해 값이 변했을 때만 보내거나, 매 프레임 보냄)
+		// 여기서는 부드러운 동기화를 위해 매 프레임 Unreliable RPC로 보냅니다.
+		ServerSetAimRotation(NewRot);
+	}
+
+	if (!IsLocallyControlled()) // 다른 사람 캐릭터만 표시
+	{
+		FVector Start = GetActorLocation() + FVector(0, 0, 80);
+		FVector End = Start + (UpperBodyAimRotation.Vector() * 100.0f);
+		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, -1.0f, 0, 2.0f);
 	}
 }
 
@@ -230,6 +257,14 @@ void APlayerCharacter::SetUpperBodyRotation(FRotator NewRotation)
 
 FRotator APlayerCharacter::GetBaseAimRotation() const
 {
+	// 로컬 컨트롤러가 있는 경우 그냥 컨트롤러 회전값 사용
+	if (IsLocallyControlled() && Controller)
+	{
+		return Controller->GetControlRotation();
+	}
+
+	// 다른 클라이언트나 서버의 경우 -> 동기화된 변수 사용
+	// 이것이 있어야 "서버"도 플레이어가 어디를 보는지 정확히 알 수 있음 (공격 판정 정확도 상승)
 	return UpperBodyAimRotation;
 }
 
@@ -243,10 +278,16 @@ void APlayerCharacter::PossessedBy(AController* NewController)
 	}
 }
 
+void APlayerCharacter::ServerSetAimRotation_Implementation(FRotator NewRotation)
+{
+	// 서버에서 변수를 업데이트하면 복제(Replication)를 통해 다른 클라이언트들에게 전파됨
+	UpperBodyAimRotation = NewRotation;
+}
+
 void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
+	DOREPLIFETIME_CONDITION(APlayerCharacter, UpperBodyAimRotation, COND_SkipOwner);
 }
 
 void APlayerCharacter::Restart()

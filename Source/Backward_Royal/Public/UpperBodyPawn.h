@@ -24,6 +24,7 @@ protected:
 	virtual void Tick(float DeltaTime) override;
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	void Look(const FInputActionValue& Value);
 	void Attack(const FInputActionValue& Value);
@@ -63,7 +64,7 @@ public:
 	UFUNCTION()
 	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Setup")
 	class APlayerCharacter* ParentBodyCharacter;
 
 	UFUNCTION(Server, Unreliable) // 자주 호출되므로 Unreliable 권장

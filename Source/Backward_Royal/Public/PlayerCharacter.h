@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "BaseCharacter.h"
 #include "InputActionValue.h"
-#include "StaminaComponent.h" // 컴포넌트 헤더 포함
+#include "StaminaComponent.h"
 #include "PlayerCharacter.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPlayerChar, Log, All);
@@ -21,6 +21,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void Restart() override;
@@ -69,6 +70,10 @@ public:
 	void SetUpperBodyRotation(FRotator NewRotation);
 	void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
 	virtual FRotator GetBaseAimRotation() const override;
+
+	// 상체 회전 동기화용 서버 RPC
+	UFUNCTION(Server, Unreliable)
+	void ServerSetAimRotation(FRotator NewRotation);
 
 public:
 	// --- Input Assets ---
