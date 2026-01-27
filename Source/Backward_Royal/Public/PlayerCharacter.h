@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "BaseCharacter.h"
 #include "InputActionValue.h"
-#include "StaminaComponent.h"
+#include "StaminaComponent.h" // 컴포넌트 헤더 포함
 #include "PlayerCharacter.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPlayerChar, Log, All);
@@ -21,7 +21,6 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
-	virtual void Tick(float DeltaTime) override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void Restart() override;
@@ -71,13 +70,6 @@ public:
 	void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
 	virtual FRotator GetBaseAimRotation() const override;
 
-	// 상체 회전 동기화용 서버 RPC
-	UFUNCTION(Server, Unreliable)
-	void ServerSetAimRotation(FRotator NewRotation);
-
-	// [추가] 현재 상체 폰 가져오기 (Getter)
-	class AUpperBodyPawn* GetCurrentUpperBodyPawn() const { return CurrentUpperBodyPawn; }
-
 public:
 	// --- Input Assets ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
@@ -113,6 +105,6 @@ public:
 	FRotator UpperBodyAimRotation;
 
 protected:
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop", Replicated)
+	UPROPERTY()
 	class AUpperBodyPawn* CurrentUpperBodyPawn;
 };

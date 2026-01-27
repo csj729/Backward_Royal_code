@@ -8,14 +8,12 @@
 #include "EnhancedInputSubsystems.h"
 #include "BRPlayerController.h"
 #include "Net/UnrealNetwork.h"
-#include "UpperBodyPawn.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY(LogPlayerChar);
 
 APlayerCharacter::APlayerCharacter()
 {
-	PrimaryActorTick.bCanEverTick = true;
 	// [기본 설정 유지]
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -79,25 +77,6 @@ void APlayerCharacter::BeginPlay()
 				Subsystem->AddMappingContext(DefaultMappingContext, 0);
 			}
 		}
-	}
-}
-
-// 회전값 동기화 수행
-void APlayerCharacter::Tick(float DeltaTime)
-{
-	Super::Tick(DeltaTime);
-
-	// 상체(승객)가 없을 때만 하체 플레이어가 회전 제어권을 가짐
-	// 상체가 있으면(CurrentUpperBodyPawn != nullptr), Tick에서 회전값을 덮어쓰지 않음
-	if (IsLocallyControlled() && CurrentUpperBodyPawn == nullptr) 
-	{
-		FRotator NewRot = GetControlRotation();
-
-		// 내 화면에서는 즉시 적용 (렉 없음)
-		UpperBodyAimRotation = NewRot;
-
-		// 서버로 전송
-		ServerSetAimRotation(NewRot);
 	}
 }
 
@@ -251,14 +230,6 @@ void APlayerCharacter::SetUpperBodyRotation(FRotator NewRotation)
 
 FRotator APlayerCharacter::GetBaseAimRotation() const
 {
-	// 로컬 컨트롤러가 있는 경우 그냥 컨트롤러 회전값 사용
-	if (IsLocallyControlled() && Controller)
-	{
-		return Controller->GetControlRotation();
-	}
-
-	// 다른 클라이언트나 서버의 경우 -> 동기화된 변수 사용
-	// 이것이 있어야 "서버"도 플레이어가 어디를 보는지 정확히 알 수 있음 (공격 판정 정확도 상승)
 	return UpperBodyAimRotation;
 }
 
@@ -272,29 +243,15 @@ void APlayerCharacter::PossessedBy(AController* NewController)
 	}
 }
 
-void APlayerCharacter::ServerSetAimRotation_Implementation(FRotator NewRotation)
-{
-	// 서버에서 변수를 업데이트하면 복제(Replication)를 통해 다른 클라이언트들에게 전파됨
-	UpperBodyAimRotation = NewRotation;
-}
-
 void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
-	DOREPLIFETIME(APlayerCharacter, CurrentUpperBodyPawn);
 }
 
 void APlayerCharacter::Restart()
 {
 	Super::Restart();
-	if (IsLocallyControlled())
-	{
-		if (InputComponent)
-		{
-			SetupPlayerInputComponent(InputComponent);
-		}
-	}
 }
 
 void APlayerCharacter::OnRep_PlayerState()
@@ -302,10 +259,6 @@ void APlayerCharacter::OnRep_PlayerState()
 	Super::OnRep_PlayerState();
 	if (IsLocallyControlled())
 	{
-		if (InputComponent)
-		{
-			SetupPlayerInputComponent(InputComponent);
-		}
 		if (ABRPlayerController* PC = Cast<ABRPlayerController>(GetController()))
 		{
 			PC->SetupRoleInput(true);

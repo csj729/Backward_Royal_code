@@ -36,6 +36,9 @@ struct FWeaponData : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float MassKg; // 무기 질량 (물리 연산용)
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Durability = 100.f; // 무기 내구도
+
     // --- 밸런싱 배율 (개별 무기용) ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float DamageCoefficient = 1.0f;

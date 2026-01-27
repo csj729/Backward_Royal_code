@@ -209,7 +209,15 @@ void ABRPlayerState::SwapControlWithPartner()
 
 		ApplyRoleSettings(MyPC, bIsLowerBody);
 		ApplyRoleSettings(PartnerPC, PartnerPS->bIsLowerBody);
+
+		ClientShowSwapAnim();
+		PartnerPS->ClientShowSwapAnim();
 	}
+}
+
+void ABRPlayerState::ClientShowSwapAnim_Implementation()
+{
+	OnPlayerSwapAnim.Broadcast();
 }
 
 FBRUserInfo ABRPlayerState::GetUserInfo() const

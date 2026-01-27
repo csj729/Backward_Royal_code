@@ -10,7 +10,6 @@
 #include "EnhancedInputSubsystems.h"
 #include "BRAttackComponent.h"
 #include "BRPlayerController.h"
-#include "Net/UnrealNetwork.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "DrawDebugHelpers.h"
 
@@ -96,15 +95,6 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
 
-		if (HasAuthority() && ParentBodyCharacter)
-		{
-			// 아직 등록되지 않았다면 등록 (서버 -> 모든 클라이언트로 CurrentUpperBodyPawn 복제됨)
-			if (ParentBodyCharacter->GetCurrentUpperBodyPawn() != this)
-			{
-				ParentBodyCharacter->SetUpperBodyPawn(this);
-			}
-		}
-
 		if (ParentBodyCharacter && Controller)
 		{
 			float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
@@ -116,8 +106,6 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 			Controller->SetControlRotation(NewRotation);
 			LastBodyYaw = CurrentBodyYaw;
 		}
-
-		return;
 	}
 
 	if (!ParentBodyCharacter || !Controller) return;
@@ -180,16 +168,6 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 			ServerUpdateAimRotation(TargetHeadRot);
 		}
 	}
-	else
-	{
-		if (IsLocallyControlled())
-		{
-			FString NetMode = HasAuthority() ? TEXT("Server") : TEXT("Client");
-			FString Msg = FString::Printf(TEXT("[%s] ERROR: ParentBodyCharacter is NULL!"), *NetMode);
-			// 붉은색 에러 메시지
-			GEngine->AddOnScreenDebugMessage(124, 0.1f, FColor::Red, Msg);
-		}
-	}
 }
 
 void AUpperBodyPawn::OnRep_PlayerState()
@@ -213,14 +191,6 @@ void AUpperBodyPawn::OnRep_PlayerState()
 			PC->SetViewTarget(this);
 		}
 	}
-}
-
-void AUpperBodyPawn::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// ParentBodyCharacter 변수를 서버 -> 클라이언트로 복제
-	DOREPLIFETIME(AUpperBodyPawn, ParentBodyCharacter);
 }
 
 void AUpperBodyPawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

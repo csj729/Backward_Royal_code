@@ -7,6 +7,7 @@
 #include "BRPlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerSwapAnim);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerState : public APlayerState
@@ -92,6 +93,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerRoleChanged OnPlayerRoleChanged;
+
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnPlayerSwapAnim OnPlayerSwapAnim;
+
+	UFUNCTION(Client, Reliable)
+	void ClientShowSwapAnim();
 
 	void SwapControlWithPartner();
 

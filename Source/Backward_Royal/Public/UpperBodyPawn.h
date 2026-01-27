@@ -3,11 +3,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "InputActionValue.h"
+#include "Misc/Optional.h" // [수정] UE 5.5 필수 헤더 (이게 없으면 오류 2천개 뜸)
 #include "UpperBodyPawn.generated.h"
 
+// 전방 선언
 class APlayerCharacter;
 class UInputMappingContext;
 class UInputAction;
+class UAnimMontage; // [수정] 몽타주 클래스 인식용
 
 UCLASS()
 class BACKWARD_ROYAL_API AUpperBodyPawn : public APawn
@@ -20,11 +23,10 @@ public:
 protected:
 	virtual void BeginPlay() override;
 
-	// [추가] 매 프레임마다 몸통 회전을 따라가기 위해 Tick이 필요합니다.
+	// 매 프레임마다 몸통 회전을 따라가기 위해 Tick이 필요합니다.
 	virtual void Tick(float DeltaTime) override;
 
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	void Look(const FInputActionValue& Value);
 	void Attack(const FInputActionValue& Value);
@@ -54,6 +56,10 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Interaction")
 	float InteractionDistance = 300.0f;
 
+	// [수정] 이 변수가 없어서 TestSoloCharacter에서 에러가 났었습니다. 추가 필수!
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	UAnimMontage* AttackMontage;
+
 	// 클라이언트에서 서버로 공격 상태 변경을 요청하는 RPC
 	UFUNCTION(Server, Reliable)
 	void ServerRequestSetAttackDetection(bool bEnabled);
@@ -64,12 +70,13 @@ public:
 	UFUNCTION()
 	void OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupted);
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Setup")
+	UPROPERTY(BlueprintReadOnly)
 	class APlayerCharacter* ParentBodyCharacter;
-
+	
 	UFUNCTION(Server, Unreliable) // 자주 호출되므로 Unreliable 권장
-	void ServerUpdateAimRotation(FRotator NewRotation);
+		void ServerUpdateAimRotation(FRotator NewRotation);
+
 private:
-	// [추가] 지난 프레임의 몸통 각도를 저장할 변수
+	// 지난 프레임의 몸통 각도를 저장할 변수
 	float LastBodyYaw;
 };
