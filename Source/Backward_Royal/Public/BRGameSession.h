@@ -13,6 +13,8 @@ class FOnlineSessionSearch;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBRCreateSessionComplete, bool, bWasSuccessful);
 DECLARE_MULTICAST_DELEGATE_OneParam(FOnBRFindSessionsComplete, const TArray<FOnlineSessionSearchResult>&);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBRJoinSessionComplete, bool, bWasSuccessful);
+// 블루프린트용 방 찾기 완료 이벤트 (세션 개수 전달)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBRFindSessionsCompleteBP, int32, SessionCount);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRGameSession : public AGameSession
@@ -37,12 +39,28 @@ public:
 	// 방 참가 (C++ 전용, Blueprint에서 사용 불가)
 	void JoinSession(const FOnlineSessionSearchResult& SessionResult);
 
+	// 찾은 세션 개수 가져오기
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	int32 GetSessionCount() const;
+
+	// 특정 인덱스의 세션 이름 가져오기
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	FString GetSessionName(int32 SessionIndex) const;
+
+	// 세션이 생성되어 있는지 확인 (블루프린트에서 사용 가능)
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	bool HasActiveSession() const;
+
 	// 방 생성 완료 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnBRCreateSessionComplete OnCreateSessionComplete;
 
 	// 방 찾기 완료 이벤트 (C++ 전용, Blueprint에서 사용 불가)
 	FOnBRFindSessionsComplete OnFindSessionsComplete;
+
+	// 방 찾기 완료 이벤트 (블루프린트용)
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnBRFindSessionsCompleteBP OnFindSessionsCompleteBP;
 
 	// 방 참가 완료 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
@@ -69,6 +87,9 @@ protected:
 
 	// 세션 참가 완료 콜백
 	void OnJoinSessionCompleteDelegate(FName InSessionName, EOnJoinSessionCompleteResult::Type Result);
+
+	// Online Subsystem 초기화 (BeginPlay에서 호출)
+	void InitializeOnlineSubsystem();
 
 	virtual void BeginPlay() override;
 };

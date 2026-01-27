@@ -3,6 +3,7 @@
 #include "BRPlayerController.h"
 #include "BRGameSession.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/GameModeBase.h"
 
@@ -41,14 +42,35 @@ void UBR_JoinMenuWidget::NativeDestruct()
 
 void UBR_JoinMenuWidget::JoinRoom(int32 SessionIndex)
 {
+	// Standalone 모드에서도 확인 가능하도록 화면에 큰 메시지 표시
+	UE_LOG(LogTemp, Warning, TEXT("========================================"));
+	UE_LOG(LogTemp, Warning, TEXT("[버튼 클릭 확인!] JoinRoom 함수 호출됨"));
+	UE_LOG(LogTemp, Warning, TEXT("세션 인덱스: %d"), SessionIndex);
+	UE_LOG(LogTemp, Warning, TEXT("========================================"));
+	
+	// 화면에 디버그 메시지 표시 (Standalone 모드에서도 보이도록 큰 글씨, 긴 시간)
+	if (GEngine)
+	{
+		FString Message = FString::Printf(TEXT(">>> 버튼 클릭 확인! 방 참가 요청: 세션 인덱스 %d <<<"), SessionIndex);
+		// 큰 키로 표시 (키 -1은 항상 표시, 10초 동안 표시, 밝은 녹색)
+		GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, Message);
+		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
+	}
+	
 	if (ABRPlayerController* BRPC = GetBRPlayerController())
 	{
-		UE_LOG(LogTemp, Log, TEXT("[JoinMenu] 방 참가 요청: 세션 인덱스=%d"), SessionIndex);
+		UE_LOG(LogTemp, Log, TEXT("[JoinMenu] PlayerController 찾음, JoinRoom 호출 중..."));
 		BRPC->JoinRoom(SessionIndex);
 	}
 	else
 	{
 		UE_LOG(LogTemp, Error, TEXT("[JoinMenu] PlayerController를 찾을 수 없습니다."));
+		
+		// 화면에 디버그 메시지 표시
+		if (GEngine)
+		{
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[JoinMenu] 실패: PlayerController를 찾을 수 없습니다!"));
+		}
 	}
 }
 

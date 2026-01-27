@@ -3,6 +3,7 @@
 #include "BRPlayerController.h"
 #include "BRGameSession.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/GameModeBase.h"
 
@@ -80,6 +81,36 @@ ABRPlayerController* UBR_EntranceMenuWidget::GetBRPlayerController() const
 
 void UBR_EntranceMenuWidget::HandleCreateRoomComplete(bool bWasSuccessful)
 {
-	// 블루프린트 이벤트 호출
-	OnCreateRoomComplete(bWasSuccessful);
+	UE_LOG(LogTemp, Log, TEXT("[EntranceMenu] 방 생성 완료: %s"), bWasSuccessful ? TEXT("성공") : TEXT("실패"));
+	
+	// 화면에 디버그 메시지 표시 (Standalone 모드에서도 확인 가능)
+	if (GEngine)
+	{
+		FString Message = bWasSuccessful ? 
+			TEXT("[EntranceMenu] 방 생성 성공! 위젯 제거 중...") : 
+			TEXT("[EntranceMenu] 방 생성 실패!");
+		FColor MessageColor = bWasSuccessful ? FColor::Green : FColor::Red;
+		GEngine->AddOnScreenDebugMessage(-1, 3.0f, MessageColor, Message);
+	}
+	
+	if (bWasSuccessful)
+	{
+		// 방 생성 성공 시 EntranceMenu 완전히 제거
+		// (맵이 다시 로드되면 BeginPlay에서 ListenServer 모드로 감지하여 LobbyMenu가 표시됨)
+		RemoveFromParent();
+		UE_LOG(LogTemp, Log, TEXT("[EntranceMenu] 방 생성 성공 - EntranceMenu 제거"));
+		
+		// PlayerController의 CurrentMenuWidget도 정리
+		if (ABRPlayerController* BRPC = GetBRPlayerController())
+		{
+			BRPC->HideCurrentMenu();
+		}
+	}
+	
+	// 블루프린트 이벤트 호출 (블루프린트에서 추가 처리 가능)
+	// 단, 방 생성 성공 시에는 블루프린트 이벤트를 호출하지 않음 (위젯이 제거되므로)
+	if (!bWasSuccessful)
+	{
+		OnCreateRoomComplete(bWasSuccessful);
+	}
 }

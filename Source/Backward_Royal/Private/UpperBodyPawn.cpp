@@ -96,6 +96,15 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
 
+		if (HasAuthority() && ParentBodyCharacter)
+		{
+			// 아직 등록되지 않았다면 등록 (서버 -> 모든 클라이언트로 CurrentUpperBodyPawn 복제됨)
+			if (ParentBodyCharacter->GetCurrentUpperBodyPawn() != this)
+			{
+				ParentBodyCharacter->SetUpperBodyPawn(this);
+			}
+		}
+
 		if (ParentBodyCharacter && Controller)
 		{
 			float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
@@ -170,14 +179,14 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 		{
 			ServerUpdateAimRotation(TargetHeadRot);
 		}
-
+	}
+	else
+	{
 		if (IsLocallyControlled())
 		{
-			// 로그에 [Server] 또는 [Client] 접두사 추가
 			FString NetMode = HasAuthority() ? TEXT("Server") : TEXT("Client");
-
-			// 메시지 출력
 			FString Msg = FString::Printf(TEXT("[%s] ERROR: ParentBodyCharacter is NULL!"), *NetMode);
+			// 붉은색 에러 메시지
 			GEngine->AddOnScreenDebugMessage(124, 0.1f, FColor::Red, Msg);
 		}
 	}

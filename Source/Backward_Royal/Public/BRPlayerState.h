@@ -54,6 +54,10 @@ public:
 	UFUNCTION()
 	void OnRep_UserUID();
 
+	// 플레이어 이름 설정
+	UFUNCTION(BlueprintCallable, Category = "User Info")
+	void SetPlayerNameString(const FString& NewPlayerName);
+
 	// 팀 번호 설정
 	UFUNCTION(BlueprintCallable, Category = "Team")
 	void SetTeamNumber(int32 NewTeamNumber);

@@ -8,6 +8,7 @@
 #include "EnhancedInputSubsystems.h"
 #include "BRPlayerController.h"
 #include "Net/UnrealNetwork.h"
+#include "UpperBodyPawn.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY(LogPlayerChar);
@@ -86,24 +87,17 @@ void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	// 로컬 플레이어(내가 조종하는 캐릭터)인 경우에만 실행
-	if (IsLocallyControlled())
+	// 상체(승객)가 없을 때만 하체 플레이어가 회전 제어권을 가짐
+	// 상체가 있으면(CurrentUpperBodyPawn != nullptr), Tick에서 회전값을 덮어쓰지 않음
+	if (IsLocallyControlled() && CurrentUpperBodyPawn == nullptr) 
 	{
 		FRotator NewRot = GetControlRotation();
 
 		// 내 화면에서는 즉시 적용 (렉 없음)
 		UpperBodyAimRotation = NewRot;
 
-		// 서버로 전송 (네트워크 대역폭 절약을 위해 값이 변했을 때만 보내거나, 매 프레임 보냄)
-		// 여기서는 부드러운 동기화를 위해 매 프레임 Unreliable RPC로 보냅니다.
+		// 서버로 전송
 		ServerSetAimRotation(NewRot);
-	}
-
-	if (!IsLocallyControlled()) // 다른 사람 캐릭터만 표시
-	{
-		FVector Start = GetActorLocation() + FVector(0, 0, 80);
-		FVector End = Start + (UpperBodyAimRotation.Vector() * 100.0f);
-		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, -1.0f, 0, 2.0f);
 	}
 }
 
@@ -287,7 +281,8 @@ void APlayerCharacter::ServerSetAimRotation_Implementation(FRotator NewRotation)
 void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME_CONDITION(APlayerCharacter, UpperBodyAimRotation, COND_SkipOwner);
+	DOREPLIFETIME(APlayerCharacter, UpperBodyAimRotation);
+	DOREPLIFETIME(APlayerCharacter, CurrentUpperBodyPawn);
 }
 
 void APlayerCharacter::Restart()

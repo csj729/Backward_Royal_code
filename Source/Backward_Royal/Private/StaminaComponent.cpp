@@ -12,7 +12,7 @@ float UStaminaComponent::Global_RegenRate = 10.0f;
 UStaminaComponent::UStaminaComponent()
 {
     PrimaryComponentTick.bCanEverTick = true;
-    SetIsReplicated(true);
+    SetIsReplicatedByDefault(true);
 
     MaxStamina = 100.0f;
     CurrentStamina = MaxStamina;

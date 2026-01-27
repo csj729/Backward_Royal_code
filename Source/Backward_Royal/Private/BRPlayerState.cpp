@@ -222,19 +222,8 @@ FBRUserInfo ABRPlayerState::GetUserInfo() const
 	UserInfo.bIsHost = bIsHost;
 	UserInfo.bIsReady = bIsReady;
 	
-	// PlayerIndex는 GameState의 PlayerArray에서 찾기
-	if (UWorld* World = GetWorld())
-	{
-		if (ABRGameState* BRGameState = World->GetGameState<ABRGameState>())
-		{
-			// PlayerArray는 TArray<TObjectPtr<APlayerState>>이므로 FindByPredicate 사용
-			int32 FoundIndex = BRGameState->PlayerArray.IndexOfByPredicate([this](const TObjectPtr<APlayerState>& PS)
-			{
-				return PS.Get() == this;
-			});
-			UserInfo.PlayerIndex = FoundIndex;
-		}
-	}
+	// PlayerIndex: 0=하체, 1=상체 (bIsLowerBody를 기반으로 변환)
+	UserInfo.PlayerIndex = bIsLowerBody ? 0 : 1;
 	
 	return UserInfo;
 }
@@ -252,4 +241,13 @@ void ABRPlayerState::SetUserUID(const FString& NewUserUID)
 void ABRPlayerState::OnRep_UserUID()
 {
 	// UI 업데이트를 위한 이벤트 발생 가능
+}
+
+void ABRPlayerState::SetPlayerNameString(const FString& NewPlayerName)
+{
+	if (HasAuthority())
+	{
+		SetPlayerName(NewPlayerName);
+		UE_LOG(LogTemp, Log, TEXT("[플레이어 이름 설정] %s"), *NewPlayerName);
+	}
 }

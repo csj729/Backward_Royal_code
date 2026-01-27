@@ -10,6 +10,9 @@ class ABRGameSession;
 class ABRGameState;
 class ABRPlayerState;
 class UUserWidget;
+class UVerticalBox;
+class UScrollBox;
+class UWidget;
 
 /**
  * 블루프린트 위젯에서 서버 함수를 호출하기 위한 Function Library
@@ -88,4 +91,37 @@ public:
 	// 준비 상태 확인
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|PlayerState", meta = (WorldContext = "WorldContextObject"))
 	static bool IsReady(const UObject* WorldContextObject);
+
+	// ============================================
+	// UI 관련 함수들
+	// ============================================
+	
+	// 메인 스크린 표시
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static void ShowMainScreen(const UObject* WorldContextObject);
+
+	// 입장 메뉴 표시
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static void ShowEntranceMenu(const UObject* WorldContextObject);
+
+	// 참가 메뉴 표시
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static void ShowJoinMenu(const UObject* WorldContextObject);
+
+	// 로비 메뉴 표시
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static void ShowLobbyMenu(const UObject* WorldContextObject);
+
+	// 현재 메뉴 숨기기
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static void HideCurrentMenu(const UObject* WorldContextObject);
+
+	// VerticalBox 또는 ScrollBox에 자식 위젯 추가 (범용 함수)
+	// VerticalBox와 ScrollBox 중 하나만 제공하면 됩니다 (둘 다 제공되면 VerticalBox 우선)
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static bool AddChildToContainer(const UObject* WorldContextObject, UVerticalBox* VerticalBox, UScrollBox* ScrollBox, UWidget* Content);
+
+	// UWidget*를 받아서 자동으로 VerticalBox 또는 ScrollBox인지 판단하여 자식 추가
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|UI", meta = (WorldContext = "WorldContextObject"))
+	static bool AddChildToContainerAuto(const UObject* WorldContextObject, UWidget* Container, UWidget* Content);
 };

@@ -63,6 +63,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	bool IsReady() const;
 
+	// 자신의 팀 번호 설정 (0=대기열, 1=1팀, 2=2팀, ... 4=4팀)
+	UFUNCTION(BlueprintCallable, Category = "Team")
+	void SetMyTeamNumber(int32 TeamNumber);
+
+	// 자신의 플레이어 역할 설정 (0=하체, 1=상체)
+	UFUNCTION(BlueprintCallable, Category = "Player Role")
+	void SetMyPlayerRole(int32 PlayerIndex);
+
 	// 플레이어 목록 변경 이벤트 (블루프린트에서 바인딩 가능)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Events")
 	void OnPlayerListChanged();

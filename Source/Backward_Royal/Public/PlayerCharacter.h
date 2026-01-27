@@ -75,6 +75,9 @@ public:
 	UFUNCTION(Server, Unreliable)
 	void ServerSetAimRotation(FRotator NewRotation);
 
+	// [추가] 현재 상체 폰 가져오기 (Getter)
+	class AUpperBodyPawn* GetCurrentUpperBodyPawn() const { return CurrentUpperBodyPawn; }
+
 public:
 	// --- Input Assets ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
@@ -110,6 +113,6 @@ public:
 	FRotator UpperBodyAimRotation;
 
 protected:
-	UPROPERTY()
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop", Replicated)
 	class AUpperBodyPawn* CurrentUpperBodyPawn;
 };

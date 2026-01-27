@@ -140,7 +140,30 @@ void ABRGameState::AssignRandomTeams()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 완료: 총 %d개 팀 생성"), (NumPlayers + 1) / 2);
+	// 팀 배정 후 모든 플레이어를 자동으로 준비 완료 상태로 설정
+	for (ABRPlayerState* BRPS : Players)
+	{
+		if (BRPS && IsValid(BRPS))
+		{
+			// 준비 상태가 아닌 경우에만 준비 완료로 설정
+			if (!BRPS->bIsReady)
+			{
+				BRPS->bIsReady = true;
+				BRPS->OnRep_IsReady();
+				FString PlayerName = BRPS->GetPlayerName();
+				if (PlayerName.IsEmpty())
+				{
+					PlayerName = TEXT("Unknown Player");
+				}
+				UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] %s 자동 준비 완료"), *PlayerName);
+			}
+		}
+	}
+
+	// 게임 시작 가능 여부 확인
+	CheckCanStartGame();
+
+	UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 완료: 총 %d개 팀 생성, 모든 플레이어 준비 완료"), (NumPlayers + 1) / 2);
 	OnTeamChanged.Broadcast();
 }
 

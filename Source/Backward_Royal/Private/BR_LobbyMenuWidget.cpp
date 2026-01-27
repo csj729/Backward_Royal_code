@@ -163,6 +163,50 @@ bool UBR_LobbyMenuWidget::IsReady() const
 	return false;
 }
 
+void UBR_LobbyMenuWidget::SetMyTeamNumber(int32 TeamNumber)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		// 팀 번호 유효성 검사 (0~4)
+		if (TeamNumber >= 0 && TeamNumber <= 4)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 팀 번호 설정: %d"), TeamNumber);
+			BRPC->SetMyTeamNumber(TeamNumber);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[LobbyMenu] 잘못된 팀 번호: %d (0~4 사이의 값이어야 합니다)"), TeamNumber);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
+void UBR_LobbyMenuWidget::SetMyPlayerRole(int32 PlayerIndex)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		// PlayerIndex: 0=하체, 1=상체
+		if (PlayerIndex == 0 || PlayerIndex == 1)
+		{
+			bool bLowerBody = (PlayerIndex == 0);
+			FString RoleName = bLowerBody ? TEXT("하체") : TEXT("상체");
+			UE_LOG(LogTemp, Log, TEXT("[LobbyMenu] 플레이어 역할 설정: %s (PlayerIndex=%d)"), *RoleName, PlayerIndex);
+			BRPC->SetMyPlayerRole(bLowerBody);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[LobbyMenu] 잘못된 PlayerIndex: %d (0=하체, 1=상체)"), PlayerIndex);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[LobbyMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
 void UBR_LobbyMenuWidget::HandlePlayerListChanged()
 {
 	// 블루프린트 이벤트 호출

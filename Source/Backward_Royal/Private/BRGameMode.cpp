@@ -334,7 +334,24 @@ void ABRGameMode::StartGame()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[게임 시작] 성공: 맵으로 이동 중... (%s)"), *GameMapPath);
+	// 맵 선택: 랜덤 맵 사용 여부에 따라 결정
+	FString SelectedMapPath;
+	if (bUseRandomMap && StageMapPaths.Num() > 0)
+	{
+		// 랜덤으로 Stage 맵 중 하나 선택
+		int32 RandomIndex = FMath::RandRange(0, StageMapPaths.Num() - 1);
+		SelectedMapPath = StageMapPaths[RandomIndex];
+		UE_LOG(LogTemp, Log, TEXT("[게임 시작] 랜덤 맵 선택: %s (인덱스: %d/%d)"), 
+			*SelectedMapPath, RandomIndex + 1, StageMapPaths.Num());
+	}
+	else
+	{
+		// 기존 GameMapPath 사용
+		SelectedMapPath = GameMapPath;
+		UE_LOG(LogTemp, Log, TEXT("[게임 시작] 기본 맵 사용: %s"), *SelectedMapPath);
+	}
+	
+	UE_LOG(LogTemp, Log, TEXT("[게임 시작] 성공: 맵으로 이동 중... (%s)"), *SelectedMapPath);
 	
 	UWorld* World = GetWorld();
 	if (!World)
@@ -356,7 +373,7 @@ void ABRGameMode::StartGame()
 	}
 	
 	// 맵 이동 - PIE 환경에 따라 Travel 방식 선택
-	FString TravelURL = GameMapPath + TEXT("?listen");
+	FString TravelURL = SelectedMapPath + TEXT("?listen");
 	
 	if (bShouldUseSeamlessTravel)
 	{
