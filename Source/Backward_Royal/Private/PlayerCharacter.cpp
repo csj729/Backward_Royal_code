@@ -1,4 +1,4 @@
-﻿#include "PlayerCharacter.h"
+#include "PlayerCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -46,8 +46,8 @@ APlayerCharacter::APlayerCharacter()
 
 	// [네트워크]
 	bReplicates = true;
-	NetUpdateFrequency = 144.0f;
-	MinNetUpdateFrequency = 100.0f;
+	SetNetUpdateFrequency(144.0f);
+	SetMinNetUpdateFrequency(100.0f);
 
 	GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
 }

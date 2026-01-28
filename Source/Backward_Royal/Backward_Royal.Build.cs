@@ -21,7 +21,9 @@ public class Backward_Royal : ModuleRules
 			"SlateCore",
             "Json",
             "JsonUtilities",
-            "Niagara"
+            "Niagara",
+            "GeometryCollectionEngine",
+            "ChaosSolverEngine"
         });
 		
 		// Standalone 모드에서 Null Online Subsystem을 사용하기 위해 동적 로드

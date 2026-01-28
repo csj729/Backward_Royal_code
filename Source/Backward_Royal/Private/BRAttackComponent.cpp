@@ -148,6 +148,7 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
         CalculatedDamage = ImpactForce * 0.001f;
     }
 	UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
+    MyWeapon->DecreaseDurability(CalculatedDamage);
     ////
 
     // 충격량 계산

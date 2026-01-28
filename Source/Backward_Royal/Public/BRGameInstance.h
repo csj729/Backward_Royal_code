@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "TimerManager.h"
 #include "WeaponTypes.h"
 #include "ArmorTypes.h"
 #include "BRGameInstance.generated.h"
@@ -18,6 +19,8 @@ public:
 	UBRGameInstance();
 	
 	virtual void Init() override;
+	virtual void OnStart() override;
+	virtual void Shutdown() override;
 
 	// 방 생성
 	UFUNCTION(Exec)
@@ -74,6 +77,50 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Player")
 	void SetPlayerName(const FString& NewPlayerName) { PlayerName = NewPlayerName; }
+
+	// LAN 전용(true) / 인터넷(Steam) 매칭(false). 방 생성·방 찾기 시 사용.
+	// 기본값: false (인터넷 매칭) - Steam을 통한 인터넷 매칭 사용
+	// 콘솔 명령어: SetLANOnly 1 (LAN 전용) / SetLANOnly 0 (인터넷 매칭)
+	UPROPERTY(BlueprintReadWrite, Category = "Session|Match")
+	bool bUseLANOnly = false;
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void SetUseLANOnly(bool bLAN) { bUseLANOnly = bLAN; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	bool GetUseLANOnly() const { return bUseLANOnly; }
+
+	/** 콘솔: SetLANOnly 1 (LAN 전용) / SetLANOnly 0 (인터넷) */
+	UFUNCTION(Exec, Category = "Session|Match")
+	void SetLANOnly(int32 bEnabled);
+
+	/** 방 생성 성공 후 ServerTravel 직전에 설정. 맵 재로드 후 로비 UI 표시 판단용. */
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void SetDidCreateRoomThenTravel(bool b) { bDidCreateRoomThenTravel = b; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	bool GetDidCreateRoomThenTravel() const { return bDidCreateRoomThenTravel; }
+
+	/** 방 생성 시 방 이름 저장 (맵 재로드 후 세션 재생성용) */
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void SetPendingRoomName(const FString& RoomName) { PendingRoomName = RoomName; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	FString GetPendingRoomName() const { return PendingRoomName; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void ClearPendingRoomName() { PendingRoomName.Empty(); }
+
+	/** 로비에서 랜덤 팀 배정 후, 게임 맵 로드 시 상체/하체 Pawn 적용 대기 플래그 */
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void SetPendingApplyRandomTeamRoles(bool b) { bPendingApplyRandomTeamRoles = b; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	bool GetPendingApplyRandomTeamRoles() const { return bPendingApplyRandomTeamRoles; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match")
+	void ClearPendingApplyRandomTeamRoles() { bPendingApplyRandomTeamRoles = false; }
+
 	// 전역 변수 설정을 위한 함수
 	void ApplyGlobalMultipliers();
 		
@@ -82,5 +129,21 @@ protected:
 	void LoadConfigFromJson(const FString& FileName, class UDataTable* TargetTable);
 
 	FString GetConfigDirectory();
+
+	/** Session/타이머/네비 등 정리 (Shutdown PIE 블록과 OnWorldCleanup 콜백에서 호출) */
+	void DoPIEExitCleanup(UWorld* World);
+
+	/** 방 생성 후 ServerTravel 호출 직전에 true 설정. BeginPlay에서 로비 표시 여부 판단에 사용. */
+	bool bDidCreateRoomThenTravel = false;
+
+	/** 방 생성 시 방 이름 저장 (맵 재로드 후 세션 재생성용) */
+	FString PendingRoomName;
+
+	/** 로비에서 랜덤 팀 배정 후, 게임 맵에서 ApplyRoleChangesForRandomTeams 호출 대기 */
+	bool bPendingApplyRandomTeamRoles = false;
+
+	/** PIE 종료 시 월드 GC 방해 방지: OnStart에서 설정한 타이머 핸들 (Shutdown에서 명시적으로 클리어) */
+	FTimerHandle ListenServerTimerHandle;
+	FTimerHandle SessionRecreateTimerHandle;
 };
 

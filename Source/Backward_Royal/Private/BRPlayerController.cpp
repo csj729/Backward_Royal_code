@@ -5,6 +5,7 @@
 #include "BRGameState.h"
 #include "BRPlayerState.h"
 #include "BRGameMode.h"
+#include "BRGameInstance.h"
 #include "GameFramework/GameModeBase.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -15,6 +16,7 @@
 #include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 #include "Blueprint/UserWidget.h"
+#include "EngineUtils.h"
 
 ABRPlayerController::ABRPlayerController()
 	: CurrentMenuWidget(nullptr)
@@ -58,83 +60,252 @@ void ABRPlayerController::BeginPlay()
 	}
 
 	// 클라이언트에서만 초기 UI 표시
+	// PostLogin 완료 후 로비 판단하려면 짧은 지연 필요. EndPlay에서 타이머 해제 + 람다 내 IsValid 검사로 open ?listen 크래시 방지.
 	if (IsLocalController())
 	{
-		// 약간의 지연 후 UI 표시 (모든 시스템이 초기화된 후)
-		// ServerTravel 후 맵이 재로드될 때를 대비해 더 긴 지연 시간 사용
-		FTimerHandle TimerHandle;
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [this]()
+		UWorld* World = GetWorld();
+		if (!World) return;
+		World->GetTimerManager().SetTimer(BeginPlayUITimerHandle, [this]()
 		{
-			UWorld* World = GetWorld();
-			if (!World)
+			// 맵 전환(open ?listen 등)으로 파괴된 뒤 콜백 방지
+			if (!IsValid(this))
+			{
+				return;
+			}
+			UWorld* W = GetWorld();
+			if (!W)
 			{
 				return;
 			}
 
-			ENetMode NetMode = World->GetNetMode();
+			W->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
+
+			ENetMode NetMode = W->GetNetMode();
+			// 클라이언트 입장 확인 (Standalone 모드에서도 확인)
+			if (NetMode == NM_Client)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("========================================"));
+				UE_LOG(LogTemp, Warning, TEXT("[클라이언트] 서버 연결 확인!"));
+				UE_LOG(LogTemp, Warning, TEXT("========================================"));
+				
+				// 네트워크 연결 상태 확인
+				if (UNetDriver* NetDriver = W->GetNetDriver())
+				{
+					if (UNetConnection* ServerConnection = NetDriver->ServerConnection)
+					{
+						FString RemoteAddress = ServerConnection->LowLevelGetRemoteAddress(true);
+						UE_LOG(LogTemp, Warning, TEXT("[클라이언트] 서버 주소: %s"), *RemoteAddress);
+						UE_LOG(LogTemp, Warning, TEXT("[클라이언트] 연결 상태: 연결됨"));
+						
+						if (GEngine)
+						{
+							FString ConnectMsg = FString::Printf(TEXT("[클라이언트] 서버 연결 성공!\n주소: %s"), *RemoteAddress);
+							GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, ConnectMsg);
+						}
+					}
+					else
+					{
+						UE_LOG(LogTemp, Error, TEXT("[클라이언트] ServerConnection이 NULL입니다!"));
+						if (GEngine)
+						{
+							GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[클라이언트] 서버 연결 실패!"));
+						}
+					}
+				}
+				else
+				{
+					UE_LOG(LogTemp, Error, TEXT("[클라이언트] NetDriver가 NULL입니다!"));
+				}
+				
+				// GameState 확인 (서버 데이터 복제 확인)
+				if (ABRGameState* BRGameState = W->GetGameState<ABRGameState>())
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[클라이언트] GameState 확인: 현재 인원 %d"), BRGameState->PlayerArray.Num());
+				}
+				else
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[클라이언트] GameState가 아직 복제되지 않았습니다. 잠시 후 확인하세요."));
+				}
+			}
 			
 			// 세션이 활성화되어 있는지 확인 (ServerTravel 후 맵 재로드 시 세션이 있을 수 있음)
 			bool bHasActiveSession = false;
-			if (AGameModeBase* GameMode = World->GetAuthGameMode())
+			if (AGameModeBase* GameMode = W->GetAuthGameMode())
 			{
 				if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
 				{
 					bHasActiveSession = GameSession->HasActiveSession();
-					if (GEngine)
-					{
-						FString DebugMsg = FString::Printf(TEXT("[BeginPlay] NetMode: %s, HasActiveSession: %s"), 
-							NetMode == NM_Standalone ? TEXT("Standalone") :
-							NetMode == NM_ListenServer ? TEXT("ListenServer") :
-							NetMode == NM_Client ? TEXT("Client") : TEXT("Other"),
-							bHasActiveSession ? TEXT("Yes") : TEXT("No"));
-						GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, DebugMsg);
-					}
 				}
 			}
 			
-			// 세션이 활성화되어 있으면 ListenServer 모드로 간주
-			if (bHasActiveSession && NetMode == NM_Standalone)
+			// 플레이어가 이미 입장했다면 (PostLogin 호출됨) 세션이 있다고 간주
+			// ServerTravel 후 세션이 일시적으로 사라질 수 있지만, 플레이어 입장은 유지됨
+			bool bHasPlayers = false;
+			int32 PlayerCount = 0;
+			if (ABRGameState* BRGameState = W->GetGameState<ABRGameState>())
 			{
-				NetMode = NM_ListenServer;
-				if (GEngine)
+				PlayerCount = BRGameState->PlayerArray.Num();
+				bHasPlayers = PlayerCount > 0;
+			}
+			
+			// 방 생성 후 ServerTravel 직전에 설정된 플래그 (GameInstance 유지)
+			bool bDidCreateRoomThenTravel = false;
+			if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+			{
+				bDidCreateRoomThenTravel = BRGI->GetDidCreateRoomThenTravel();
+			}
+			
+			// 세션이 있거나, (방 생성→ServerTravel 직후이며 플레이어 있음) 이면 방 생성 완료 상태로 간주
+			// Standalone 모드에서는 항상 main UI를 표시하므로 bRoomCreated를 false로 설정
+			bool bRoomCreated = false;
+			if (NetMode != NM_Standalone)
+			{
+				// Standalone이 아닌 경우에만 방 생성 상태 확인
+				bRoomCreated = bHasActiveSession || (bDidCreateRoomThenTravel && bHasPlayers);
+			}
+			
+			if (GEngine)
+			{
+				FString DebugMsg = FString::Printf(TEXT("[BeginPlay] NetMode: %s, HasActiveSession: %s, Players: %d, bDidCreateRoomThenTravel: %s"), 
+					NetMode == NM_Standalone ? TEXT("Standalone") :
+					NetMode == NM_ListenServer ? TEXT("ListenServer") :
+					NetMode == NM_Client ? TEXT("Client") : TEXT("Other"),
+					bHasActiveSession ? TEXT("Yes") : TEXT("No"),
+					PlayerCount,
+					bDidCreateRoomThenTravel ? TEXT("Yes") : TEXT("No"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, DebugMsg);
+			}
+			
+			UE_LOG(LogTemp, Warning, TEXT("[PlayerController] BeginPlay UI 결정: NetMode=%s, bHasActiveSession=%s, bHasPlayers=%s, bDidCreateRoomThenTravel=%s"),
+				NetMode == NM_Standalone ? TEXT("Standalone") :
+				NetMode == NM_ListenServer ? TEXT("ListenServer") :
+				NetMode == NM_Client ? TEXT("Client") : TEXT("Other"),
+				bHasActiveSession ? TEXT("Yes") : TEXT("No"),
+				bHasPlayers ? TEXT("Yes") : TEXT("No"),
+				bDidCreateRoomThenTravel ? TEXT("Yes") : TEXT("No"));
+			
+			// Standalone 모드에서는 항상 main UI (EntranceMenu)를 표시
+			// NetMode를 변경하지 않고 실제 NetMode에 따라 UI를 결정
+			if (bRoomCreated && NetMode == NM_ListenServer)
+			{
+				// ListenServer 모드에서 세션이 활성화되어 있으면 정상적인 방 생성 완료 상태
+				UE_LOG(LogTemp, Log, TEXT("[PlayerController] ListenServer 모드에서 세션/플레이어 확인 - 로비로 이동"));
+			}
+			
+			// 로비 표시 시 플래그 클리어 (다음 메인 복귀 시 엔트런스 표시용)
+			if ((NetMode == NM_Client || NetMode == NM_ListenServer) && (MainScreenWidget || LobbyMenuWidgetClass))
+			{
+				if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
 				{
-					GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, TEXT("[BeginPlay] 세션 활성화 감지 - ListenServer 모드로 간주"));
+					BRGI->SetDidCreateRoomThenTravel(false);
 				}
 			}
 			
 			// MainScreenWidget이 설정되어 있으면 네트워크 모드에 따라 적절한 메뉴로 전환
 			if (MainScreenWidget && IsValid(MainScreenWidget))
 			{
-				if (NetMode == NM_Client)
+				// Standalone 모드 처리
+				if (NetMode == NM_Standalone)
 				{
+					// 방 생성 후 ServerTravel로 인한 재로드인 경우 LobbyMenu 표시
+					// 세션이 없어도 플레이어가 있고 방 생성 플래그가 있으면 LobbyMenu 표시
+					// (ServerTravel 직후 NetMode가 아직 Standalone일 수 있지만, 방 생성 후 재로드 상태면 LobbyMenu)
+					// 세션 체크는 제거 - ServerTravel 직후 세션이 아직 초기화되지 않을 수 있음
+					bool bShouldShowLobby = bDidCreateRoomThenTravel && bHasPlayers;
+					
+					UE_LOG(LogTemp, Warning, TEXT("[PlayerController] Standalone 모드 UI 결정: bShouldShowLobby=%s (bDidCreateRoomThenTravel=%s, bHasPlayers=%s)"),
+						bShouldShowLobby ? TEXT("Yes") : TEXT("No"),
+						bDidCreateRoomThenTravel ? TEXT("Yes") : TEXT("No"),
+						bHasPlayers ? TEXT("Yes") : TEXT("No"));
+					
+					if (bShouldShowLobby)
+					{
+						// 방 생성 후 재로드 상태 - LobbyMenu 표시
+						SetMainScreenToLobbyMenu();
+						UE_LOG(LogTemp, Warning, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - Standalone 모드이지만 방 생성 후 재로드 상태"));
+					}
+					else
+					{
+						// 일반 Standalone 모드 - EntranceMenu 표시
+						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+						{
+							BRGI->SetDidCreateRoomThenTravel(false);
+						}
+						SetMainScreenToEntranceMenu();
+						UE_LOG(LogTemp, Warning, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - Standalone 모드 (강제)"));
+					}
+				}
+				else if (NetMode == NM_Client)
+				{
+					// Client 모드는 항상 LobbyMenu (서버에 연결된 상태)
 					SetMainScreenToLobbyMenu();
 					UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - Client 모드"));
 				}
 				else if (NetMode == NM_ListenServer)
 				{
-					SetMainScreenToLobbyMenu();
-					UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - ListenServer 모드"));
+					// ListenServer 모드: 세션이 있으면 LobbyMenu, 없으면 MainMenu
+					if (bHasActiveSession || (bDidCreateRoomThenTravel && bHasPlayers))
+					{
+						// 세션이 있거나 방 생성 후 재로드 상태 - LobbyMenu 표시
+						SetMainScreenToLobbyMenu();
+						UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - ListenServer 모드 (세션 있음)"));
+					}
+					else
+					{
+						// 세션이 없음 - MainMenu 표시 (처음 실행 시)
+						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+						{
+							BRGI->SetDidCreateRoomThenTravel(false);
+						}
+						SetMainScreenToEntranceMenu();
+						UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - ListenServer 모드 (세션 없음)"));
+					}
 				}
 				else
 				{
+					if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+					{
+						BRGI->SetDidCreateRoomThenTravel(false);
+					}
 					SetMainScreenToEntranceMenu();
-					UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - Standalone 모드"));
+					UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - 기타 모드"));
 				}
 			}
 			// MainScreenWidget이 없으면 기존 방식대로 위젯 표시
 			else
 			{
-				// ListenServer 모드이면 LobbyMenu 표시
+				// ListenServer 모드: 세션이 있으면 LobbyMenu, 없으면 MainMenu
 				if (NetMode == NM_ListenServer)
 				{
-					if (LobbyMenuWidgetClass)
+					// 세션이 있거나 방 생성 후 재로드 상태 - LobbyMenu 표시
+					if (bHasActiveSession || (bDidCreateRoomThenTravel && bHasPlayers))
 					{
-						ShowLobbyMenu();
-						UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - ListenServer 모드"));
+						if (LobbyMenuWidgetClass)
+						{
+							ShowLobbyMenu();
+							UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - ListenServer 모드 (세션 있음)"));
+						}
+						else
+						{
+							UE_LOG(LogTemp, Warning, TEXT("[PlayerController] LobbyMenuWidgetClass가 설정되지 않았습니다."));
+						}
 					}
 					else
 					{
-						UE_LOG(LogTemp, Warning, TEXT("[PlayerController] LobbyMenuWidgetClass가 설정되지 않았습니다."));
+						// 세션이 없음 - MainMenu 표시 (처음 실행 시)
+						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+						{
+							BRGI->SetDidCreateRoomThenTravel(false);
+						}
+						if (EntranceMenuWidgetClass)
+						{
+							ShowEntranceMenu();
+							UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - ListenServer 모드 (세션 없음)"));
+						}
+						else
+						{
+							UE_LOG(LogTemp, Warning, TEXT("[PlayerController] EntranceMenuWidgetClass가 설정되지 않았습니다."));
+						}
 					}
 				}
 				// Client 모드이면 LobbyMenu 표시
@@ -150,21 +321,48 @@ void ABRPlayerController::BeginPlay()
 						UE_LOG(LogTemp, Warning, TEXT("[PlayerController] LobbyMenuWidgetClass가 설정되지 않았습니다."));
 					}
 				}
-				// Standalone 모드이면 EntranceMenu 표시
+				// Standalone 모드이면 EntranceMenu 표시 (단, 방 생성 후 재로드인 경우는 예외)
 				else
 				{
-					if (EntranceMenuWidgetClass)
+					// 방 생성 후 ServerTravel로 인한 재로드인 경우 LobbyMenu 표시
+					// 세션이 없어도 플레이어가 있고 방 생성 플래그가 있으면 LobbyMenu 표시
+					// 세션 체크는 제거 - ServerTravel 직후 세션이 아직 초기화되지 않을 수 있음
+					bool bShouldShowLobby = bDidCreateRoomThenTravel && bHasPlayers;
+					
+					UE_LOG(LogTemp, Warning, TEXT("[PlayerController] Standalone 모드 UI 결정 (MainScreenWidget 없음): bShouldShowLobby=%s (bDidCreateRoomThenTravel=%s, bHasPlayers=%s)"),
+						bShouldShowLobby ? TEXT("Yes") : TEXT("No"),
+						bDidCreateRoomThenTravel ? TEXT("Yes") : TEXT("No"),
+						bHasPlayers ? TEXT("Yes") : TEXT("No"));
+					
+					if (bShouldShowLobby)
 					{
-						ShowEntranceMenu();
-						UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - Standalone 모드"));
+						// 방 생성 후 재로드 상태 - LobbyMenu 표시
+						if (LobbyMenuWidgetClass)
+						{
+							ShowLobbyMenu();
+							UE_LOG(LogTemp, Warning, TEXT("[PlayerController] 초기 UI (LobbyMenu) 표시 - Standalone 모드이지만 방 생성 후 재로드 상태"));
+						}
 					}
 					else
 					{
-						UE_LOG(LogTemp, Warning, TEXT("[PlayerController] EntranceMenuWidgetClass가 설정되지 않았습니다. 블루프린트에서 설정해주세요."));
+						// 일반 Standalone 모드 - EntranceMenu 표시
+						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
+						{
+							BRGI->SetDidCreateRoomThenTravel(false);
+						}
+						if (EntranceMenuWidgetClass)
+						{
+							ShowEntranceMenu();
+							UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - Standalone 모드"));
+						}
+						else
+						{
+							UE_LOG(LogTemp, Warning, TEXT("[PlayerController] EntranceMenuWidgetClass가 설정되지 않았습니다. 블루프린트에서 설정해주세요."));
+						}
 					}
 				}
 			}
-		}, 0.5f, false); // 지연 시간을 0.1초에서 0.5초로 증가 (ServerTravel 완료 대기)
+		}, 0.45f, false);
 	}
 }
 
@@ -192,6 +390,12 @@ void ABRPlayerController::OnRep_Pawn()
 
 void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// BeginPlay UI 타이머 해제 (open ?listen 맵 전환 시 파괴 후 콜백 크래시 방지)
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
+	}
+
 	// 네트워크 연결 실패 델리게이트 언바인딩
 	if (UEngine* Engine = GEngine)
 	{
@@ -293,42 +497,78 @@ void ABRPlayerController::HandleNetworkFailure(UWorld* World, UNetDriver* NetDri
 
 void ABRPlayerController::CreateRoom(const FString& RoomName)
 {
-	UE_LOG(LogTemp, Log, TEXT("[방 생성] 명령 실행: %s"), *RoomName);
+	UE_LOG(LogTemp, Error, TEXT("[방 생성] CreateRoom 호출됨: %s"), *RoomName);
+	
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		ENetMode NetMode = World->GetNetMode();
+		UE_LOG(LogTemp, Error, TEXT("[방 생성] 현재 NetMode: %s"), 
+			NetMode == NM_Standalone ? TEXT("Standalone") :
+			NetMode == NM_ListenServer ? TEXT("ListenServer") :
+			NetMode == NM_Client ? TEXT("Client") :
+			NetMode == NM_DedicatedServer ? TEXT("DedicatedServer") : TEXT("Unknown"));
+	}
+	
+	// 방 생성 요청 시 플래그 설정 (ServerTravel 후 재로드 시 감지용)
+	if (World)
+	{
+		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			BRGI->SetDidCreateRoomThenTravel(true);
+			UE_LOG(LogTemp, Error, TEXT("[방 생성] SetDidCreateRoomThenTravel 플래그 설정"));
+		}
+	}
 	
 	if (HasAuthority())
 	{
+		UE_LOG(LogTemp, Error, TEXT("[방 생성] 서버 권한 있음 - 직접 실행"));
 		// 서버에서 직접 실행
-		if (UWorld* World = GetWorld())
+		if (World)
 		{
 			if (AGameModeBase* GameMode = World->GetAuthGameMode())
 			{
+				UE_LOG(LogTemp, Error, TEXT("[방 생성] GameMode 발견: %s"), *GameMode->GetClass()->GetName());
 				if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
 				{
-					UE_LOG(LogTemp, Log, TEXT("[방 생성] 세션 생성 요청 중..."));
+					UE_LOG(LogTemp, Error, TEXT("[방 생성] GameSession 발견! 세션 생성 요청 중..."));
 					GameSession->CreateRoomSession(RoomName);
 				}
 				else
 				{
-					UE_LOG(LogTemp, Error, TEXT("[방 생성] 실패: GameSession을 찾을 수 없습니다."));
+					UE_LOG(LogTemp, Error, TEXT("[방 생성] ❌ GameSession을 찾을 수 없습니다."));
+					if (GameMode->GameSession)
+					{
+						UE_LOG(LogTemp, Error, TEXT("[방 생성] GameMode->GameSession 타입: %s (ABRGameSession이 아님)"), 
+							*GameMode->GameSession->GetClass()->GetName());
+					}
+					else
+					{
+						UE_LOG(LogTemp, Error, TEXT("[방 생성] GameMode->GameSession이 NULL입니다."));
+					}
 				}
 			}
 			else
 			{
-				UE_LOG(LogTemp, Error, TEXT("[방 생성] 실패: GameMode를 찾을 수 없습니다."));
+				UE_LOG(LogTemp, Error, TEXT("[방 생성] ❌ GameMode를 찾을 수 없습니다."));
 			}
 		}
 	}
 	else
 	{
+		UE_LOG(LogTemp, Error, TEXT("[방 생성] 클라이언트 권한 - 서버로 RPC 전송..."));
 		// 클라이언트에서는 서버로 RPC 전송
-		UE_LOG(LogTemp, Log, TEXT("[방 생성] 클라이언트에서 서버로 요청 전송..."));
 		ServerCreateRoom(RoomName);
 	}
 }
 
 void ABRPlayerController::CreateRoomWithPlayerName(const FString& RoomName, const FString& PlayerName)
 {
-	UE_LOG(LogTemp, Log, TEXT("[방 생성 및 플레이어 이름 설정] 방=%s, 이름=%s"), *RoomName, *PlayerName);
+	UE_LOG(LogTemp, Error, TEXT("========================================"));
+	UE_LOG(LogTemp, Error, TEXT("[방 생성] CreateRoomWithPlayerName 호출됨!"));
+	UE_LOG(LogTemp, Error, TEXT("[방 생성] 방 이름: %s, 플레이어 이름: %s"), *RoomName, *PlayerName);
+	UE_LOG(LogTemp, Error, TEXT("========================================"));
+	
 	// 먼저 플레이어 이름 설정
 	SetPlayerName(PlayerName);
 	// 그 다음 방 생성
@@ -403,13 +643,6 @@ void ABRPlayerController::JoinRoom(int32 SessionIndex)
 	if (!World)
 	{
 		UE_LOG(LogTemp, Error, TEXT("[방 참가] 실패: World를 찾을 수 없습니다."));
-		
-		// 화면에 디버그 메시지 표시
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[방 참가] 실패: World를 찾을 수 없습니다!"));
-		}
-		
 		return;
 	}
 
@@ -417,70 +650,57 @@ void ABRPlayerController::JoinRoom(int32 SessionIndex)
 	ENetMode NetMode = World->GetNetMode();
 	
 	// ListenServer나 DedicatedServer는 JoinRoom을 실행할 수 없음
-	// (Standalone 모드는 허용 - 다른 세션에 참가 가능)
 	if (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 호스트는 이미 서버이므로 다른 방에 참가할 수 없습니다."));
-		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 클라이언트만 다른 방에 참가할 수 있습니다."));
-		
-		// 화면에 디버그 메시지 표시
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("[방 참가] 호스트는 다른 방에 참가할 수 없습니다!"));
 		}
-		
 		return;
 	}
 
-	// 클라이언트만 실행
-	if (HasAuthority())
+	// [수정] 클라이언트에서 직접 로컬 GameSession을 통해 참가 시도
+	// 기존에는 서버 RPC를 호출했으나, 세션 참가는 클라이언트 시스템에서 이루어져야 함
+	if (IsLocalController())
 	{
-		// Standalone 모드에서 실행 (로컬 게임)
-		UE_LOG(LogTemp, Warning, TEXT("[JoinRoom] HasAuthority() = true, Standalone 모드"));
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, TEXT("[JoinRoom] Standalone 모드에서 실행 중..."));
-		}
+		UE_LOG(LogTemp, Log, TEXT("[방 참가] 로컬 컨트롤러: 직접 세션 참가 시도..."));
 		
+		ABRGameSession* BRGameSession = nullptr;
+		
+		// 1. GameMode에서 GameSession 가져오기 (Standalone 모드용)
 		if (AGameModeBase* GameMode = World->GetAuthGameMode())
 		{
-			if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
+			BRGameSession = Cast<ABRGameSession>(GameMode->GameSession);
+		}
+		
+		// 2. GameMode에 없으면 (NM_Client 모드 등), 직접 GameSession 찾기
+		if (!BRGameSession)
+		{
+			for (TActorIterator<ABRGameSession> It(World); It; ++It)
 			{
-				UE_LOG(LogTemp, Warning, TEXT("[JoinRoom] GameSession 찾음, JoinSessionByIndex 호출 중..."));
-				if (GEngine)
-				{
-					FString Msg = FString::Printf(TEXT("[JoinRoom] GameSession->JoinSessionByIndex(%d) 호출"), SessionIndex);
-					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Cyan, Msg);
-				}
-				GameSession->JoinSessionByIndex(SessionIndex);
+				BRGameSession = *It;
+				break;
 			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("[방 참가] 실패: GameSession을 찾을 수 없습니다."));
-				
-				// 화면에 디버그 메시지 표시
-				if (GEngine)
-				{
-					GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[방 참가] 실패: GameSession을 찾을 수 없습니다!"));
-				}
-			}
+		}
+
+		if (BRGameSession)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[방 참가] BRGameSession 발견, JoinSessionByIndex(%d) 호출"), SessionIndex);
+			BRGameSession->JoinSessionByIndex(SessionIndex);
 		}
 		else
 		{
-			UE_LOG(LogTemp, Error, TEXT("[방 참가] 실패: GameMode를 찾을 수 없습니다."));
-			
-			// 화면에 디버그 메시지 표시
+			UE_LOG(LogTemp, Error, TEXT("[방 참가] 실패: ABRGameSession을 찾을 수 없습니다."));
 			if (GEngine)
 			{
-				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[방 참가] 실패: GameMode를 찾을 수 없습니다!"));
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, TEXT("[방 참가] 실패: 세션 관리자를 찾을 수 없습니다!"));
 			}
 		}
 	}
 	else
 	{
-		// 클라이언트에서는 서버로 RPC 전송
-		UE_LOG(LogTemp, Log, TEXT("[방 참가] 클라이언트에서 서버로 요청 전송..."));
-		ServerJoinRoom(SessionIndex);
+		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 로컬 컨트롤러가 아닙니다."));
 	}
 }
 
@@ -696,11 +916,16 @@ void ABRPlayerController::ServerToggleReady_Implementation()
 
 void ABRPlayerController::ServerRequestRandomTeams_Implementation()
 {
-	// 서버에서 직접 팀 배정 실행
+	// 서버에서 직접 팀 배정 실행 (역할/팀 번호만 설정, 상체 스폰·빙의는 게임 맵 로드 후 적용)
 	if (ABRGameState* BRGameState = GetWorld()->GetGameState<ABRGameState>())
 	{
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 서버에서 직접 실행: 총 %d명의 플레이어"), BRGameState->PlayerArray.Num());
 		BRGameState->AssignRandomTeams();
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetWorld()->GetGameInstance()))
+		{
+			GI->SetPendingApplyRandomTeamRoles(true);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 게임 맵 이동 시 상체/하체 Pawn 적용 예약됨"));
+		}
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 완료"));
 	}
 	else
@@ -795,13 +1020,18 @@ void ABRPlayerController::RequestRandomTeams()
 		return;
 	}
 	
-	// 서버에서 직접 실행
+	// 서버에서 직접 실행 (역할/팀 번호만 설정, 상체 스폰·빙의는 게임 맵 로드 후 적용)
 	if (HasAuthority())
 	{
 		if (ABRGameState* BRGameState = World->GetGameState<ABRGameState>())
 		{
 			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 서버에서 직접 실행: 총 %d명의 플레이어"), BRGameState->PlayerArray.Num());
 			BRGameState->AssignRandomTeams();
+			if (UBRGameInstance* GI = Cast<UBRGameInstance>(World->GetGameInstance()))
+			{
+				GI->SetPendingApplyRandomTeamRoles(true);
+				UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 게임 맵 이동 시 상체/하체 Pawn 적용 예약됨"));
+			}
 			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 완료"));
 		}
 		else
@@ -1125,6 +1355,15 @@ void ABRPlayerController::ShowJoinMenu()
 
 void ABRPlayerController::ShowLobbyMenu()
 {
+	// Standalone 모드에서는 LobbyMenu를 표시하지 않음
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() == NM_Standalone)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[PlayerController] ShowLobbyMenu: Standalone 모드에서는 LobbyMenu를 표시하지 않습니다. EntranceMenu를 표시합니다."));
+		ShowEntranceMenu();
+		return;
+	}
+	
 	if (LobbyMenuWidgetClass)
 	{
 		ShowMenuWidget(LobbyMenuWidgetClass);
@@ -1160,15 +1399,31 @@ void ABRPlayerController::SetMainScreenWidget(UUserWidget* Widget)
 		// 서버 모드(ListenServer) 또는 Standalone
 		else if (NetMode == NM_ListenServer || NetMode == NM_Standalone)
 		{
-			// NetMode가 ListenServer인 경우에만 세션이 있다고 판단
-			bool bHasActiveSession = (NetMode == NM_ListenServer);
-			
-			if (bHasActiveSession)
+			// ListenServer 모드: 세션이 있으면 LobbyMenu, 없으면 MainMenu
+			if (NetMode == NM_ListenServer)
 			{
-				SetMainScreenToLobbyMenu();
+				// 세션 확인
+				bool bHasActiveSession = false;
+				if (AGameModeBase* GameMode = World->GetAuthGameMode())
+				{
+					if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
+					{
+						bHasActiveSession = GameSession->HasActiveSession();
+					}
+				}
+				
+				if (bHasActiveSession)
+				{
+					SetMainScreenToLobbyMenu();
+				}
+				else
+				{
+					SetMainScreenToEntranceMenu();
+				}
 			}
 			else
 			{
+				// Standalone 모드: 항상 MainMenu
 				SetMainScreenToEntranceMenu();
 			}
 		}
@@ -1247,6 +1502,33 @@ void ABRPlayerController::SetMainScreenToEntranceMenu()
 
 void ABRPlayerController::SetMainScreenToLobbyMenu()
 {
+	// Standalone 모드에서는 일반적으로 LobbyMenu를 표시하지 않지만,
+	// 방 생성 후 ServerTravel로 인한 재로드인 경우는 예외
+	UWorld* World = GetWorld();
+	if (World && World->GetNetMode() == NM_Standalone)
+	{
+		// 방 생성 후 재로드 상태인지 확인
+		bool bIsRoomCreationReload = false;
+		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			bIsRoomCreationReload = BRGI->GetDidCreateRoomThenTravel();
+		}
+		
+		// 플레이어가 있는지 확인 (세션 체크는 제거 - ServerTravel 직후 세션이 아직 초기화되지 않을 수 있음)
+		bool bHasPlayers = false;
+		if (ABRGameState* BRGameState = World->GetGameState<ABRGameState>())
+		{
+			bHasPlayers = BRGameState->PlayerArray.Num() > 0;
+		}
+		
+		// 방 생성 후 재로드가 아니거나 플레이어가 없으면 LobbyMenu를 표시하지 않음
+		if (!bIsRoomCreationReload || !bHasPlayers)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[PlayerController] SetMainScreenToLobbyMenu: Standalone 모드에서는 LobbyMenu를 표시하지 않습니다."));
+			return;
+		}
+	}
+	
 	// WBP_MainScreen 블루프린트에서 이 함수를 구현해야 합니다.
 	if (MainScreenWidget && IsValid(MainScreenWidget))
 	{

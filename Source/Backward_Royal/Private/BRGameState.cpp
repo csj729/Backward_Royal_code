@@ -104,40 +104,23 @@ void ABRGameState::AssignRandomTeams()
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] %s -> 팀 %d"), *PlayerName, TeamNumber);
 	}
 
-	// 팀 배정 후, 입장 순서(원래 PlayerArray 인덱스)에 따라 하체/상체 역할 재할당
-	// PlayerArray의 인덱스 순서대로 정렬된 플레이어 리스트 생성
-	TArray<ABRPlayerState*> SortedPlayers;
-	for (int32 i = 0; i < PlayerArray.Num(); i++)
+	// 팀 배정 후, 팀 순서(Players = 랜덤 팀 순)에 따라 하체/상체 역할 재할당
+	// 규칙: 모든 팀 공통 하체→상체 (1팀 하체→상체, 2팀 하체→상체, 3팀 하체→상체, …)
+	// PlayerIndices[i] = Players[i]의 PlayerArray 인덱스 (셔플 시 같이 스왑했으므로 현재 대응)
+	for (int32 i = 0; i < NumPlayers; i++)
 	{
-		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+		const int32 PosInTeam = i % 2;      // 0=팀 내 첫 번째(하체), 1=팀 내 두 번째(상체)
+		const bool bLower = (PosInTeam == 0);
+		int32 ConnectedIdx = -1;
+		if (bLower && (i + 1) < NumPlayers)
 		{
-			SortedPlayers.Add(BRPS);
+			ConnectedIdx = PlayerIndices[i + 1]; // 상체 쪽의 PlayerArray 인덱스
 		}
-	}
-
-	// 입장 순서대로 하체/상체 역할 할당
-	for (int32 i = 0; i < SortedPlayers.Num(); i++)
-	{
-		if (i == 0)
+		else if (!bLower && (i - 1) >= 0)
 		{
-			// 첫 번째 플레이어 = 하체
-			SortedPlayers[i]->SetPlayerRole(true, -1);
+			ConnectedIdx = PlayerIndices[i - 1]; // 하체 쪽의 PlayerArray 인덱스
 		}
-		else if (i % 2 == 0)
-		{
-			// 홀수 번째 플레이어 (인덱스가 짝수) = 하체
-			SortedPlayers[i]->SetPlayerRole(true, -1);
-		}
-		else
-		{
-			// 짝수 번째 플레이어 = 이전 플레이어의 상체
-			int32 LowerBodyPlayerIndex = i - 1;
-			if (LowerBodyPlayerIndex >= 0 && LowerBodyPlayerIndex < SortedPlayers.Num())
-			{
-				SortedPlayers[i]->SetPlayerRole(false, LowerBodyPlayerIndex);
-				SortedPlayers[LowerBodyPlayerIndex]->SetPlayerRole(true, i);
-			}
-		}
+		Players[i]->SetPlayerRole(bLower, ConnectedIdx);
 	}
 
 	// 팀 배정 후 모든 플레이어를 자동으로 준비 완료 상태로 설정

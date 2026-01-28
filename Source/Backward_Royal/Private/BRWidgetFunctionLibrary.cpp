@@ -7,9 +7,12 @@
 #include "BRPlayerState.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/NetDriver.h"
+#include "Engine/NetConnection.h"
 #include "Kismet/GameplayStatics.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/LocalPlayer.h"
 #include "Components/VerticalBox.h"
 #include "Components/ScrollBox.h"
 #include "Components/Widget.h"
@@ -18,21 +21,79 @@ ABRPlayerController* UBRWidgetFunctionLibrary::GetBRPlayerController(const UObje
 {
 	if (!WorldContextObject)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[WidgetFunctionLibrary] GetBRPlayerController: WorldContextObject가 nullptr입니다."));
 		return nullptr;
 	}
 
-	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	UWorld* World = nullptr;
+	
+	// 여러 방법으로 World 가져오기 시도
+	if (GEngine)
+	{
+		World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	}
+	
+	// WorldContextObject가 UWorld를 직접 상속하는 경우
+	if (!World && WorldContextObject->IsA<UWorld>())
+	{
+		World = const_cast<UWorld*>(Cast<UWorld>(WorldContextObject));
+	}
+	
+	// WorldContextObject가 UObject이고 Outer를 통해 World를 찾는 경우
+	if (!World && WorldContextObject)
+	{
+		World = WorldContextObject->GetWorld();
+	}
+	
 	if (!World)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("[WidgetFunctionLibrary] GetBRPlayerController: World를 찾을 수 없습니다."));
 		return nullptr;
 	}
 
-	if (APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0))
+	// PlayerController 찾기 시도
+	APlayerController* PC = nullptr;
+	
+	// 방법 1: UGameplayStatics 사용
+	PC = UGameplayStatics::GetPlayerController(World, 0);
+	
+	// 방법 2: World에서 직접 가져오기
+	if (!PC && World->GetFirstPlayerController())
 	{
-		return Cast<ABRPlayerController>(PC);
+		PC = World->GetFirstPlayerController();
+	}
+	
+	// 방법 3: LocalPlayer를 통해 가져오기
+	if (!PC && GEngine)
+	{
+		if (ULocalPlayer* LocalPlayer = GEngine->GetFirstGamePlayer(World))
+		{
+			PC = LocalPlayer->GetPlayerController(World);
+		}
+	}
+	
+	if (!PC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[WidgetFunctionLibrary] GetBRPlayerController: PlayerController를 찾을 수 없습니다. (World: %s)"), 
+			World ? *World->GetName() : TEXT("None"));
+		return nullptr;
 	}
 
-	return nullptr;
+	ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC);
+	if (!BRPC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[WidgetFunctionLibrary] GetBRPlayerController: PlayerController를 BRPlayerController로 캐스팅할 수 없습니다. (Type: %s)"), 
+			*PC->GetClass()->GetName());
+		return nullptr;
+	}
+
+	return BRPC;
+}
+
+bool UBRWidgetFunctionLibrary::GetBRPlayerControllerSafe(const UObject* WorldContextObject, ABRPlayerController*& OutPlayerController)
+{
+	OutPlayerController = GetBRPlayerController(WorldContextObject);
+	return OutPlayerController != nullptr;
 }
 
 void UBRWidgetFunctionLibrary::CreateRoom(const UObject* WorldContextObject, const FString& RoomName)
@@ -98,6 +159,32 @@ void UBRWidgetFunctionLibrary::JoinRoom(const UObject* WorldContextObject, int32
 	}
 
 	BRPC->JoinRoomWithPlayerName(SessionIndex, PlayerName);
+}
+
+void UBRWidgetFunctionLibrary::SetUseLANOnly(const UObject* WorldContextObject, bool bLAN)
+{
+	if (!WorldContextObject || !GEngine) return;
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World) return;
+	UGameInstance* GI = World->GetGameInstance();
+	if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(GI))
+	{
+		BRGI->SetUseLANOnly(bLAN);
+		UE_LOG(LogTemp, Log, TEXT("[WidgetFunctionLibrary] SetUseLANOnly: %s"), bLAN ? TEXT("LAN 전용") : TEXT("인터넷 매칭"));
+	}
+}
+
+bool UBRWidgetFunctionLibrary::GetUseLANOnly(const UObject* WorldContextObject)
+{
+	if (!WorldContextObject || !GEngine) return true;
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World) return true;
+	UGameInstance* GI = World->GetGameInstance();
+	if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(GI))
+	{
+		return BRGI->GetUseLANOnly();
+	}
+	return true;
 }
 
 void UBRWidgetFunctionLibrary::ToggleReady(const UObject* WorldContextObject)
@@ -217,6 +304,66 @@ bool UBRWidgetFunctionLibrary::IsReady(const UObject* WorldContextObject)
 	}
 
 	return false;
+}
+
+// ============================================
+// 네트워크 연결 상태 확인 함수 구현
+// ============================================
+
+bool UBRWidgetFunctionLibrary::IsConnectedToServer(const UObject* WorldContextObject)
+{
+	if (!WorldContextObject || !GEngine) return false;
+	
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World) return false;
+	
+	ENetMode NetMode = World->GetNetMode();
+	
+	// 클라이언트 모드인 경우에만 연결 확인
+	if (NetMode == NM_Client)
+	{
+		// PlayerController를 통해 연결 확인 (더 안전한 방법)
+		if (APlayerController* PC = World->GetFirstPlayerController())
+		{
+			// GetNetConnection()을 사용하여 연결 확인
+			if (UNetConnection* Connection = PC->GetNetConnection())
+			{
+				// 연결이 존재하면 연결된 것으로 간주
+				// State는 private이므로 연결 존재 여부만 확인
+				return Connection != nullptr;
+			}
+		}
+		
+		// 대체 방법: NetDriver를 통한 확인
+		if (UNetDriver* NetDriver = World->GetNetDriver())
+		{
+			// ServerConnection이 존재하면 연결된 것으로 간주
+			// State는 private이므로 연결 존재 여부만 확인
+			return NetDriver->ServerConnection != nullptr;
+		}
+		return false;
+	}
+	
+	// 서버 모드(ListenServer/DedicatedServer)는 항상 "연결됨"으로 간주
+	return (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer);
+}
+
+FString UBRWidgetFunctionLibrary::GetNetworkMode(const UObject* WorldContextObject)
+{
+	if (!WorldContextObject || !GEngine) return TEXT("Unknown");
+	
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World) return TEXT("Unknown");
+	
+	ENetMode NetMode = World->GetNetMode();
+	switch (NetMode)
+	{
+	case NM_Standalone: return TEXT("Standalone");
+	case NM_Client: return TEXT("Client");
+	case NM_ListenServer: return TEXT("ListenServer");
+	case NM_DedicatedServer: return TEXT("DedicatedServer");
+	default: return TEXT("Unknown");
+	}
 }
 
 // ============================================

@@ -2,6 +2,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GeometryCollection/GeometryCollectionObject.h"
 #include "WeaponTypes.generated.h"
 
 // 무기 종류
@@ -31,10 +32,13 @@ struct FWeaponData : public FTableRowBase
     UStaticMesh* WeaponMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UGeometryCollection* FracturedMesh;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FName DisplayName;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    float MassKg; // 무기 질량 (물리 연산용)
+    float MassKg = 10.f; // 무기 질량 (물리 연산용)
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Durability = 100.f; // 무기 내구도

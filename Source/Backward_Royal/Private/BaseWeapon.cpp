@@ -1,6 +1,8 @@
 #include "BaseWeapon.h"
 #include "BaseCharacter.h"
 #include "BRGameInstance.h"
+#include "GeometryCollection/GeometryCollectionActor.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Kismet/GameplayStatics.h"
 
 // 로그 매크로
@@ -152,4 +154,70 @@ void ABaseWeapon::OnDropped()
         WeaponMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
         bIsEquipped = false;
     }
+}
+
+// 내구도 감소 로직 구현
+void ABaseWeapon::DecreaseDurability(float DamageAmount)
+{
+    if (CurrentWeaponData.Durability <= 0.0f) return;
+
+    // Version 1: 고정 수치 감소
+    const float FixedReduction = 50.0f;
+    float DurabilityToReduce = FixedReduction;
+
+    // Version 2: 데미지 비례 (주석)
+    // float DurabilityToReduce = DamageAmount * 0.1f;
+
+    CurrentWeaponData.Durability = FMath::Clamp(CurrentWeaponData.Durability - DurabilityToReduce, 0.0f, CurrentWeaponData.Durability);
+
+    LOG_WEAPON(Display, "Durability: %.1f / %.1f", CurrentWeaponData.Durability, 100.f);
+
+    // [추가됨] 내구도 0 도달 시 파괴 로직 실행
+    if (CurrentWeaponData.Durability <= 0.0f)
+    {
+        BreakWeapon();
+    }
+}
+
+void ABaseWeapon::BreakWeapon()
+{
+    // 1. 장착 해제 (물리적 분리)
+    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+    DetachFromActor(DetachRules);
+
+    LOG_WEAPON(Warning, "Weapon [%s] has been BROKEN!", *WeaponRowName.ToString());
+
+    // Chaos Destruction 활용 (데이터 테이블의 정보 사용)
+    // CurrentWeaponData.FracturedMesh를 참조합니다.
+    if (CurrentWeaponData.FracturedMesh)
+    {
+        FTransform SpawnTransform = GetActorTransform();
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+        AGeometryCollectionActor* FracturedActor = GetWorld()->SpawnActor<AGeometryCollectionActor>(
+            AGeometryCollectionActor::StaticClass(),
+            SpawnTransform,
+            SpawnParams
+        );
+
+        if (FracturedActor)
+        {
+            UGeometryCollectionComponent* GCComp = FracturedActor->GetGeometryCollectionComponent();
+            if (GCComp)
+            {
+                // 데이터 테이블에서 가져온 파괴 에셋 설정
+                GCComp->SetRestCollection(CurrentWeaponData.FracturedMesh);
+                GCComp->SetSimulatePhysics(true);
+            }
+            FracturedActor->SetLifeSpan(10.0f);
+        }
+    }
+    else
+    {
+        LOG_WEAPON(Error, "No FracturedMesh defined in DataTable for [%s]!", *WeaponRowName.ToString());
+    }
+
+    // 원본 제거
+    Destroy();
 }

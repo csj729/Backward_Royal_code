@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
+#include "TimerManager.h"
 #include "BRPlayerController.generated.h"
 
 // 전방 선언
@@ -203,5 +204,8 @@ private:
 	// WBP_MainScreen 추적 (블루프린트에서 설정 가능)
 	UPROPERTY()
 	class UUserWidget* MainScreenWidget;
+
+	// BeginPlay UI 초기화 타이머 (EndPlay에서 해제하여 open ?listen 크래시 방지)
+	FTimerHandle BeginPlayUITimerHandle;
 };
 

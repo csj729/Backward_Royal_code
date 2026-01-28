@@ -4,6 +4,8 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "InteractableInterface.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
+#include "GeometryCollection/GeometryCollectionObject.h"
 #include "WeaponTypes.h"
 #include "BaseWeapon.generated.h"
 
@@ -46,6 +48,13 @@ public:
 
     virtual void OnEquipped();
     virtual void OnDropped();
+
+    // [추가됨] 파괴 로직 함수
+    void BreakWeapon();
+
+    // DamageAmount: 공격 시 가한 데미지 (버전 2에서 사용)
+    UFUNCTION(BlueprintCallable, Category = "Weapon|Durability")
+    void DecreaseDurability(float DamageAmount);
 
 protected:
     virtual void BeginPlay() override;

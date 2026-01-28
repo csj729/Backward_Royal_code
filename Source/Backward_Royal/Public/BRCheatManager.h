@@ -44,5 +44,9 @@ public:
 	// 현재 상태 확인
 	UFUNCTION(Exec)
 	void ShowRoomInfo();
+
+	/** Listen Server로 재시작 (맵?listen). 호스트는 이 명령 실행 후 방 만들기. 콘솔: OpenListenServer */
+	UFUNCTION(Exec, Category = "Session")
+	void OpenListenServer();
 };
 

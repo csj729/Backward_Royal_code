@@ -29,8 +29,12 @@ public:
 	// ============================================
 	
 	// PlayerController 가져오기
-	UFUNCTION(BlueprintCallable, Category = "BR Widget|PlayerController", meta = (WorldContext = "WorldContextObject"))
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|PlayerController", meta = (WorldContext = "WorldContextObject", CallInEditor = "true"))
 	static ABRPlayerController* GetBRPlayerController(const UObject* WorldContextObject);
+	
+	// PlayerController 가져오기 (안전한 버전 - 유효성 검사 포함)
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|PlayerController", meta = (WorldContext = "WorldContextObject", CallInEditor = "true"))
+	static bool GetBRPlayerControllerSafe(const UObject* WorldContextObject, ABRPlayerController*& OutPlayerController);
 
 	// 방 생성
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject"))
@@ -43,6 +47,13 @@ public:
 	// 방 참가
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject"))
 	static void JoinRoom(const UObject* WorldContextObject, int32 SessionIndex);
+
+	/** LAN 전용(true) / 인터넷 매칭(false). 방 만들기·방 찾기 전에 설정. */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject"))
+	static void SetUseLANOnly(const UObject* WorldContextObject, bool bLAN);
+
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject"))
+	static bool GetUseLANOnly(const UObject* WorldContextObject);
 
 	// 준비 상태 토글
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Room", meta = (WorldContext = "WorldContextObject"))
@@ -91,6 +102,18 @@ public:
 	// 준비 상태 확인
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|PlayerState", meta = (WorldContext = "WorldContextObject"))
 	static bool IsReady(const UObject* WorldContextObject);
+
+	// ============================================
+	// 네트워크 연결 상태 확인
+	// ============================================
+	
+	/** 클라이언트가 서버에 연결되었는지 확인 (Standalone 모드에서도 사용 가능) */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Network", meta = (WorldContext = "WorldContextObject"))
+	static bool IsConnectedToServer(const UObject* WorldContextObject);
+
+	/** 현재 네트워크 모드 확인 (Standalone/Client/ListenServer 등) */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Network", meta = (WorldContext = "WorldContextObject"))
+	static FString GetNetworkMode(const UObject* WorldContextObject);
 
 	// ============================================
 	// UI 관련 함수들
