@@ -381,3 +381,8 @@ void ABaseCharacter::EnhanceFistPhysics(bool bEnable)
         else GetMesh()->SetAllBodiesBelowSimulatePhysics(BoneName, true, true);
     }
 }
+
+void ABaseCharacter::HandleWeaponBroken()
+{
+    CurrentWeapon = nullptr;
+}

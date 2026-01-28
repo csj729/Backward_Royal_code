@@ -88,8 +88,9 @@ public:
     // 다음 공격이 왼손인지 확인하는 플래그
     bool bNextAttackIsLeft = false;
 
-    // [신규] 공격 요청 처리 (서버에서 호출됨)
+    // 공격 요청 처리 (서버에서 호출됨)
     void RequestAttack();
+    void HandleWeaponBroken();
 
     // 기존 무기 공격 멀티캐스트
     UFUNCTION(NetMulticast, Reliable)

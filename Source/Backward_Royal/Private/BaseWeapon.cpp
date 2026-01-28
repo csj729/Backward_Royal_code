@@ -181,14 +181,31 @@ void ABaseWeapon::DecreaseDurability(float DamageAmount)
 
 void ABaseWeapon::BreakWeapon()
 {
-    // 1. 장착 해제 (물리적 분리)
-    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
-    DetachFromActor(DetachRules);
-
+    // [2025-11-18] 커스텀 디버그 로그 매크로 사용
     LOG_WEAPON(Warning, "Weapon [%s] has been BROKEN!", *WeaponRowName.ToString());
 
-    // Chaos Destruction 활용 (데이터 테이블의 정보 사용)
-    // CurrentWeaponData.FracturedMesh를 참조합니다.
+    // 1. 시각적 처리: 원본 메시를 즉시 숨기고 충돌을 제거
+    // Destroy()는 프레임 끝에 수행되므로 시각적으로 즉시 사라지게 해야 겹쳐 보이지 않습니다.
+    if (WeaponMesh)
+    {
+        WeaponMesh->SetVisibility(false);
+        WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+        WeaponMesh->SetSimulatePhysics(false);
+    }
+
+    // 2. 소유자 참조 해제
+    ABaseCharacter* OwnerCharacter = Cast<ABaseCharacter>(GetOwner());
+    if (OwnerCharacter)
+    {
+        OwnerCharacter->HandleWeaponBroken();
+    }
+
+    // 3. 장착 해제 및 물리적 분리
+    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+    DetachFromActor(DetachRules);
+    bIsEquipped = false;
+
+    // 4. Chaos Destruction 실행
     if (CurrentWeaponData.FracturedMesh)
     {
         FTransform SpawnTransform = GetActorTransform();
@@ -208,7 +225,14 @@ void ABaseWeapon::BreakWeapon()
             {
                 // 데이터 테이블에서 가져온 파괴 에셋 설정
                 GCComp->SetRestCollection(CurrentWeaponData.FracturedMesh);
+
+                // [수정] 물리 시뮬레이션 활성화 및 히트 이벤트 설정
                 GCComp->SetSimulatePhysics(true);
+                GCComp->SetNotifyRigidBodyCollision(true);
+
+                // [추가] 조각들이 사방으로 흩어지도록 초기 충격을 가함
+                // 단순히 스폰만 하면 형태를 유지한 채 떨어질 수 있으므로 임펄스를 추가합니다.
+                GCComp->AddImpulse(FVector(0.f, 0.f, 50.f)); // 위쪽으로 살짝 튀게 함
             }
             FracturedActor->SetLifeSpan(10.0f);
         }
@@ -216,8 +240,9 @@ void ABaseWeapon::BreakWeapon()
     else
     {
         LOG_WEAPON(Error, "No FracturedMesh defined in DataTable for [%s]!", *WeaponRowName.ToString());
+        Destroy();
     }
 
-    // 원본 제거
+    // 5. 원본 액터 제거
     Destroy();
 }
