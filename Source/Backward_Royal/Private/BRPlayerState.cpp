@@ -144,8 +144,8 @@ void ABRPlayerState::SwapControlWithPartner()
 	if (!GS || !GS->PlayerArray.IsValidIndex(ConnectedPlayerIndex)) return;
 
 	ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedPlayerIndex]);
-	ABRPlayerController* MyPC = Cast<ABRPlayerController>(GetOwner());
-	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwner());
+	ABRPlayerController* MyPC = Cast<ABRPlayerController>(GetOwningController());
+	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwningController());
 
 	if (MyPC && PartnerPC)
 	{

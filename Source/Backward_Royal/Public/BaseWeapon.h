@@ -58,7 +58,7 @@ public:
     void DecreaseDurability(float DamageAmount);
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    float DurabilityReduction = 50.f;
+    float DurabilityReduction = 10.f;
 
     bool IsEquipped() { return bIsEquipped; }
 

@@ -9,8 +9,8 @@
 UENUM(BlueprintType)
 enum class EWeaponType : uint8
 {
-    OneHand,
-    TwoHand,
+    OneHanded,
+    TwoHanded,
     None
 };
 

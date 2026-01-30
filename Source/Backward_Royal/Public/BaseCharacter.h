@@ -28,10 +28,18 @@ protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
     virtual void Die();
 
+    // 사망 시 충격량(Impulse)과 위치(HitLocation)를 함께 전송
     UFUNCTION(NetMulticast, Reliable)
-    void MulticastDie();
+    void MulticastDie(FVector Impulse, FVector HitLocation, FVector ServerDieLocation, FRotator ServerDieRotation);
 
 public:
+    // [변경] 단순히 사망 시 사용할 충격량을 저장만 하는 함수 (즉시 적용 X)
+    void SetLastHitInfo(FVector Impulse, FVector HitLocation);
+
+    // [유지] 사망 시 적용할 마지막 충격량 저장 (서버 전용)
+    FVector LastDeathImpulse = FVector::ZeroVector;
+    FVector LastDeathHitLocation = FVector::ZeroVector;
+
     // --- Components ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Armor")
     USkeletalMeshComponent* HeadMesh;
@@ -55,11 +63,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
     float DefaultWalkSpeed;
 
-    // 블루프린트 UI에서 바인딩할 변수
     UPROPERTY(BlueprintAssignable, Category = "Events")
     FOnHPChanged OnHPChanged;
 
-    // 체력이 변할 때 공통적으로 호출할 헬퍼 함수
     void UpdateHPUI();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Stats")
@@ -71,39 +77,33 @@ public:
     UFUNCTION()
     void OnRep_CurrentHP();
 
-    // =================================================================
-    // [전투 시스템]
-    // =================================================================
-
-    // 무기 공격 몽타주
+    // --- Combat ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
-    UAnimMontage* AttackMontage;
-    // 펀치 몽타주
+    UAnimMontage* OneHandedAttackMontage;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat")
+    UAnimMontage* TwoHandedAttackMontage;
+
     UPROPERTY(EditAnywhere, Category = "Combat")
     UAnimMontage* PunchMontage_L;
 
     UPROPERTY(EditAnywhere, Category = "Combat")
     UAnimMontage* PunchMontage_R;
 
-    // 다음 공격이 왼손인지 확인하는 플래그
     bool bNextAttackIsLeft = false;
 
-    // 공격 요청 처리 (서버에서 호출됨)
     void RequestAttack();
     void HandleWeaponBroken();
 
-    // 기존 무기 공격 멀티캐스트
     UFUNCTION(NetMulticast, Reliable)
-    void MulticastPlayWeaponAttack(APawn* RequestingPawn);
+    void MulticastPlayWeaponAttack(UAnimMontage* MontageToPlay, APawn* RequestingPawn);
 
-    // 공격 실행 (몽타주 기반)
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlayPunch(UAnimMontage* TargetMontage);
 
     UFUNCTION(BlueprintCallable)
     void EnhancePhysics(bool bEnable);
 
-    // 데미지 처리
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
 
     UPROPERTY(BlueprintAssignable, Category = "Events")
@@ -129,7 +129,5 @@ public:
     void SetArmorColor(EArmorSlot Slot, FLinearColor Color);
 
 protected:
-    // 캐릭터 자체의 공격 상태 플래그
     bool bIsCharacterAttacking = false;
-    
 };

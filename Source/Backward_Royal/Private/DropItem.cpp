@@ -10,6 +10,8 @@ ADropItem::ADropItem()
     PrimaryActorTick.bCanEverTick = false;
     SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
     RootComponent = SceneRoot;
+
+    bReplicates = true;
 }
 
 void ADropItem::BeginPlay()

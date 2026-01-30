@@ -210,7 +210,7 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 					// -----------------------------------------------------------
 					// [추가 기능] 서버 권한 상체 스폰 및 소유권 부여
 					// -----------------------------------------------------------
-					APlayerController* LowerBodyController = Cast<APlayerController>(LowerBodyPS->GetOwner());
+					APlayerController* LowerBodyController = Cast<APlayerController>(LowerBodyPS->GetOwningController());
 					if (LowerBodyController && UpperBodyClass)
 					{
 						APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerBodyController->GetPawn());
@@ -409,7 +409,8 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 		ABRPlayerState* UpperPS = SortedByTeam[2 * TeamIndex + 1];
 		if (UpperPS && !UpperPS->bIsLowerBody) // 상체인 경우만
 		{
-			APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwner());
+			// PlayerState → Controller는 GetOwningController() 사용 (GetOwner()는 PlayerState에서 설정되지 않을 수 있음)
+			APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
 			if (UpperPC)
 			{
 				APawn* OldPawn = UpperPC->GetPawn();
@@ -431,9 +432,15 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 				LowerPS->bIsLowerBody ? TEXT("Y") : TEXT("N"), UpperPS->bIsLowerBody ? TEXT("Y") : TEXT("N"));
 			continue;
 		}
-		APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwner());
-		APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwner());
-		if (!LowerPC || !UpperPC) continue;
+		// PlayerState → Controller는 GetOwningController() 사용 (GetOwner()는 null일 수 있어 2팀 상체 등 빙의 실패 원인)
+		APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwningController());
+		APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
+		if (!LowerPC || !UpperPC)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d Controller 없음 - 하체PC:%s 상체PC:%s, 스킵"),
+				TeamIndex + 1, LowerPC ? TEXT("O") : TEXT("X"), UpperPC ? TEXT("O") : TEXT("X"));
+			continue;
+		}
 
 		// 하체 플레이어가 현재 소유한 Pawn 사용 (가입 순서가 아닌 역할 기준)
 		APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());

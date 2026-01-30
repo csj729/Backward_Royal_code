@@ -20,6 +20,8 @@ ASwitchOrb::ASwitchOrb()
     // 2. 나이아가라 컴포넌트 설정
     OrbNiagaraComp = CreateDefaultSubobject<UNiagaraComponent>(TEXT("OrbNiagaraComp"));
     OrbNiagaraComp->SetupAttachment(RootComponent);
+
+    bReplicates = true;
 }
 
 void ASwitchOrb::BeginPlay()

@@ -6,6 +6,7 @@
 #include "BRPlayerState.h"
 #include "BRGameMode.h"
 #include "BRGameInstance.h"
+#include "UpperBodyPawn.h"
 #include "GameFramework/GameModeBase.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -403,6 +404,18 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 void ABRPlayerController::OnRep_Pawn()
 {
 	Super::OnRep_Pawn();
+
+	// 상체 Pawn으로 복제 수신 시, BeginPlay가 Controller 설정 전에 호출될 수 있어
+	// 마우스(Look) 입력이 등록되지 않는 경우 방지: 여기서 입력/뷰 강제 설정
+	if (APawn* MyPawn = GetPawn())
+	{
+		if (IsLocalController() && MyPawn->IsA<AUpperBodyPawn>())
+		{
+			SetupRoleInput(false); // 상체 IMC 등록
+			SetViewTarget(MyPawn);
+			SetIgnoreMoveInput(true);
+		}
+	}
 
 	if (OnPawnChanged.IsBound())
 	{
