@@ -47,3 +47,6 @@ struct BACKWARD_ROYAL_API FBRUserInfo
 	{
 	}
 };
+
+/** 로비/UI 표시용: PlayerName이 비어있거나 UserUID와 같으면 fallback(Player N) 사용 */
+BACKWARD_ROYAL_API bool ShouldUseFallbackDisplayName(const FString& PlayerName, const FString& UserUID);

@@ -4,6 +4,12 @@
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerState.h"
 
+/** 로비 표시용: 비어 있거나 UserUID와 같으면 "Player N"으로 저장. 패턴 없음. */
+bool ShouldUseFallbackDisplayName(const FString& PlayerName, const FString& UserUID)
+{
+	return PlayerName.IsEmpty() || PlayerName == UserUID;
+}
+
 ABRGameState::ABRGameState()
 {
 	PlayerCount = 0;
@@ -15,7 +21,11 @@ void ABRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(ABRGameState, PlayerCount);
+	DOREPLIFETIME(ABRGameState, PlayerListForDisplay);
+	DOREPLIFETIME(ABRGameState, LobbyEntrySlots);
+	DOREPLIFETIME(ABRGameState, LobbyTeamSlots);
 	DOREPLIFETIME(ABRGameState, bCanStartGame);
+	DOREPLIFETIME(ABRGameState, RoomTitle);
 }
 
 void ABRGameState::BeginPlay()
@@ -33,6 +43,61 @@ void ABRGameState::UpdatePlayerList()
 		{
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 목록] 업데이트: %d -> %d명"), OldCount, PlayerCount);
 		}
+		// 서버가 플레이어 목록을 채워 복제 → 클라이언트도 동일 목록으로 UI 표시. "Player N" 폴백 없음 → 이름 없으면 공란, ServerSetPlayerName 도착 시 갱신
+		PlayerListForDisplay.Empty();
+		for (int32 i = 0; i < PlayerArray.Num(); i++)
+		{
+			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+			{
+				FBRUserInfo Info = BRPS->GetUserInfo();
+				Info.PlayerIndex = i;
+				UE_LOG(LogTemp, Warning, TEXT("[로비이름] UpdatePlayerList | [%d] PlayerName='%s' UserUID='%s'"), i, *Info.PlayerName, *Info.UserUID);
+				PlayerListForDisplay.Add(Info);
+			}
+		}
+
+		// 로비 Entry / SelectTeam 슬롯 초기화·갱신 (서버만)
+		const int32 NumEntrySlots = 8;
+		const int32 NumTeamSlots = 8; // 4팀 * 2슬롯
+		if (LobbyEntrySlots.Num() != NumEntrySlots)
+		{
+			LobbyEntrySlots.SetNum(NumEntrySlots);
+			for (int32 i = 0; i < NumEntrySlots; i++) LobbyEntrySlots[i] = -1;
+		}
+		if (LobbyTeamSlots.Num() != NumTeamSlots)
+		{
+			LobbyTeamSlots.SetNum(NumTeamSlots);
+			for (int32 i = 0; i < NumTeamSlots; i++) LobbyTeamSlots[i] = -1;
+		}
+		// 나간 플레이어 인덱스는 슬롯에서 제거
+		auto IsValidPlayerIndex = [this](int32 Idx) -> bool
+		{
+			return Idx >= 0 && Idx < PlayerArray.Num() && PlayerArray[Idx];
+		};
+		for (int32 i = 0; i < LobbyEntrySlots.Num(); i++)
+		{
+			if (!IsValidPlayerIndex(LobbyEntrySlots[i])) LobbyEntrySlots[i] = -1;
+		}
+		for (int32 i = 0; i < LobbyTeamSlots.Num(); i++)
+		{
+			if (!IsValidPlayerIndex(LobbyTeamSlots[i])) LobbyTeamSlots[i] = -1;
+		}
+		// 새로 들어온 플레이어를 Entry 첫 빈 자리에 배치
+		for (int32 i = 0; i < PlayerArray.Num(); i++)
+		{
+			bool bFound = false;
+			for (int32 k : LobbyEntrySlots) { if (k == i) { bFound = true; break; } }
+			if (!bFound)
+			{
+				for (int32 k : LobbyTeamSlots) { if (k == i) { bFound = true; break; } }
+			}
+			if (bFound) continue;
+			for (int32 j = 0; j < LobbyEntrySlots.Num(); j++)
+			{
+				if (LobbyEntrySlots[j] == -1) { LobbyEntrySlots[j] = i; break; }
+			}
+		}
+
 		OnRep_PlayerCount();
 		CheckCanStartGame();
 		OnPlayerListChanged.Broadcast();
@@ -201,6 +266,12 @@ void ABRGameState::OnRep_PlayerCount()
 	OnPlayerListChanged.Broadcast();
 }
 
+void ABRGameState::OnRep_PlayerListForDisplay()
+{
+	// 클라이언트: 복제된 목록 수신 시 UI 갱신
+	OnPlayerListChanged.Broadcast();
+}
+
 void ABRGameState::OnRep_CanStartGame()
 {
 	// UI 업데이트를 위한 이벤트 발생 가능
@@ -208,18 +279,22 @@ void ABRGameState::OnRep_CanStartGame()
 
 TArray<FBRUserInfo> ABRGameState::GetAllPlayerUserInfo() const
 {
+	// 서버가 채운 PlayerListForDisplay가 복제되므로, 서버·클라이언트 모두 이 배열로 UI 표시
+	if (PlayerListForDisplay.Num() > 0)
+	{
+		return PlayerListForDisplay;
+	}
+	// 폴백: 아직 한 번도 UpdatePlayerList가 호출되지 않은 경우(초기 등)
 	TArray<FBRUserInfo> UserInfoArray;
-	
 	for (int32 i = 0; i < PlayerArray.Num(); i++)
 	{
 		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
 		{
 			FBRUserInfo UserInfo = BRPS->GetUserInfo();
-			UserInfo.PlayerIndex = i; // PlayerArray에서의 인덱스 설정
+			UserInfo.PlayerIndex = i;
 			UserInfoArray.Add(UserInfo);
 		}
 	}
-	
 	return UserInfoArray;
 }
 
@@ -237,4 +312,155 @@ FBRUserInfo ABRGameState::GetPlayerUserInfo(int32 PlayerIndex) const
 	}
 	
 	return UserInfo;
+}
+
+TArray<FBRUserInfo> ABRGameState::GetLobbyEntryDisplayList() const
+{
+	TArray<FBRUserInfo> Out;
+	Out.SetNum(8);
+	for (int32 i = 0; i < 8 && i < LobbyEntrySlots.Num(); i++)
+	{
+		int32 Pidx = LobbyEntrySlots[i];
+		if (Pidx >= 0 && Pidx < PlayerArray.Num())
+		{
+			// 서버가 채운 PlayerListForDisplay 우선 사용 → 클라이언트는 복제된 목록으로 올바른 이름 표시
+			if (Pidx < PlayerListForDisplay.Num())
+			{
+				Out[i] = PlayerListForDisplay[Pidx];
+				Out[i].PlayerIndex = Pidx;
+			}
+			else
+			{
+				Out[i] = GetPlayerUserInfo(Pidx);
+			}
+			// "Player N" 폴백 제거: 이름 없으면 공란으로 두고, ServerSetPlayerName 도착 시 갱신
+		}
+		// else 빈 슬롯은 기본 FBRUserInfo(PlayerIndex=-1, PlayerName 빈) → UI에서 공란 표시
+	}
+	return Out;
+}
+
+FBRUserInfo ABRGameState::GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex) const
+{
+	FBRUserInfo Empty;
+	int32 Idx = TeamIndex * 2 + SlotIndex;
+	if (LobbyTeamSlots.Num() <= Idx || Idx < 0) return Empty;
+	int32 Pidx = LobbyTeamSlots[Idx];
+	if (Pidx < 0 || Pidx >= PlayerArray.Num()) return Empty;
+	FBRUserInfo Info = GetPlayerUserInfo(Pidx);
+	// "Player N" 폴백 제거: 이름 없으면 공란으로 UI에서 표시
+	return Info;
+}
+
+void ABRGameState::OnRep_LobbySlots()
+{
+	OnPlayerListChanged.Broadcast();
+}
+
+bool ABRGameState::AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, int32 SlotIndex)
+{
+	if (!HasAuthority()) return false;
+	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 1) return false;
+	if (PlayerIndex < 0 || PlayerIndex >= PlayerArray.Num()) return false;
+	const int32 Flat = TeamIndex * 2 + SlotIndex;
+	if (LobbyTeamSlots.Num() <= Flat || LobbyEntrySlots.Num() < 8) return false;
+
+	// Entry에서 해당 플레이어 제거
+	bool bFoundInEntry = false;
+	for (int32 i = 0; i < LobbyEntrySlots.Num(); i++)
+	{
+		if (LobbyEntrySlots[i] == PlayerIndex)
+		{
+			LobbyEntrySlots[i] = -1;
+			bFoundInEntry = true;
+			break;
+		}
+	}
+	// 기존 팀 슬롯에 있던 플레이어는 Entry 첫 빈 자리로
+	int32 OldPlayer = LobbyTeamSlots[Flat];
+	if (OldPlayer >= 0)
+	{
+		for (int32 i = 0; i < LobbyEntrySlots.Num(); i++)
+		{
+			if (LobbyEntrySlots[i] == -1) { LobbyEntrySlots[i] = OldPlayer; break; }
+		}
+	}
+	LobbyTeamSlots[Flat] = PlayerIndex;
+	if (!bFoundInEntry)
+	{
+		// 이미 팀 다른 슬롯에 있었을 수 있음 → 그 슬롯 비우기
+		for (int32 i = 0; i < LobbyTeamSlots.Num(); i++)
+		{
+			if (LobbyTeamSlots[i] == PlayerIndex) LobbyTeamSlots[i] = -1;
+		}
+	}
+	OnPlayerListChanged.Broadcast();
+	return true;
+}
+
+bool ABRGameState::MovePlayerToLobbyEntry(int32 TeamIndex, int32 SlotIndex)
+{
+	if (!HasAuthority()) return false;
+	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 1) return false;
+	const int32 Flat = TeamIndex * 2 + SlotIndex;
+	if (LobbyTeamSlots.Num() <= Flat || LobbyEntrySlots.Num() < 8) return false;
+	int32 PlayerIndex = LobbyTeamSlots[Flat];
+	if (PlayerIndex < 0) return false;
+	LobbyTeamSlots[Flat] = -1;
+	for (int32 i = 0; i < LobbyEntrySlots.Num(); i++)
+	{
+		if (LobbyEntrySlots[i] == -1)
+		{
+			LobbyEntrySlots[i] = PlayerIndex;
+			OnPlayerListChanged.Broadcast();
+			return true;
+		}
+	}
+	LobbyTeamSlots[Flat] = PlayerIndex; // 빈 자리 없으면 원복
+	return false;
+}
+
+FString ABRGameState::GetHostPlayerName() const
+{
+	for (int32 i = 0; i < PlayerArray.Num(); i++)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+		{
+			if (BRPS->bIsHost)
+			{
+				FString Name = BRPS->GetPlayerName();
+				return Name.IsEmpty() ? FString(TEXT("Host")) : Name;
+			}
+		}
+	}
+	return FString();
+}
+
+void ABRGameState::SetRoomTitle(const FString& InRoomTitle)
+{
+	if (HasAuthority())
+	{
+		RoomTitle = InRoomTitle;
+		UE_LOG(LogTemp, Log, TEXT("[방 제목] 서버 설정: %s"), *RoomTitle);
+		OnRep_RoomTitle();
+	}
+}
+
+void ABRGameState::OnRep_RoomTitle()
+{
+	// UI 갱신 시 활용 가능
+}
+
+FString ABRGameState::GetRoomTitleDisplay() const
+{
+	if (!RoomTitle.IsEmpty())
+	{
+		return RoomTitle;
+	}
+	FString HostName = GetHostPlayerName();
+	if (HostName.IsEmpty())
+	{
+		return FString(TEXT("Host's Game"));
+	}
+	return HostName + TEXT("'s Game");
 }

@@ -40,6 +40,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	void JoinRoomWithPlayerName(int32 SessionIndex, const FString& PlayerName);
 
+	/** 로비에서 방 나가기. 클라이언트는 서버 연결을 끊고, 호스트는 세션을 종료한 뒤 메인 맵으로 이동합니다. */
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	void LeaveRoom();
+
 	// 준비 상태 토글
 	UFUNCTION(BlueprintCallable, Exec, Category = "Room")
 	void ToggleReady();
@@ -68,6 +72,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetMyPlayerRole(bool bLowerBody);
 
+	/** 로비: Entry → SelectTeam 슬롯 배치 요청 (자신을 TeamIndex 팀의 SlotIndex 슬롯에 배치). TeamIndex 0~3=팀1~4, SlotIndex 0=1Player 1=2Player */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void RequestAssignToLobbyTeam(int32 TeamIndex, int32 SlotIndex);
+
+	/** 로비: SelectTeam 슬롯 → Entry로 이동 요청 (해당 팀/슬롯의 플레이어를 Entry 첫 빈 자리로) */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void RequestMoveToLobbyEntry(int32 TeamIndex, int32 SlotIndex);
+
 	// 현재 상태 확인: ShowRoomInfo
 	UFUNCTION(Exec, Category = "Room")
 	void ShowRoomInfo();
@@ -75,6 +87,10 @@ public:
 	// 클라이언트 RPC 함수들
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyGameStarting();
+
+	/** 입장 직후 방 제목 전달 (복제 대기 없이 "○○'s Game" 즉시 표시) */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveRoomTitle(const FString& RoomTitle);
 
 	// 역할에 따른 입력 매핑 교체 함수
 	UFUNCTION(BlueprintCallable, Category = "Input")
@@ -129,6 +145,9 @@ public:
 	// WBP_MainScreen의 WidgetSwitcher 인덱스를 LobbyMenu로 설정
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void SetMainScreenToLobbyMenu();
+
+	/** PIE/서버 종료 시 위젯 참조를 먼저 끊을 때 호출 (GameInstance DoPIEExitCleanup에서 호출) */
+	void ClearUIForShutdown();
 
 	UFUNCTION(BlueprintCallable, Category = "UI")
 	void HideCurrentMenu();
@@ -187,6 +206,12 @@ protected:
 
 	UFUNCTION(Server, Reliable)
 	void ServerSetPlayerRole(bool bLowerBody);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestAssignToLobbyTeam(int32 TeamIndex, int32 SlotIndex);
+
+	UFUNCTION(Server, Reliable)
+	void ServerRequestMoveToLobbyEntry(int32 TeamIndex, int32 SlotIndex);
 
 private:
 	// 내부 헬퍼 함수들

@@ -1,6 +1,8 @@
 // BRGameInstance.cpp
 #include "BRGameInstance.h"
 #include "BRPlayerController.h"
+#include "BRGameState.h"
+#include "BRPlayerState.h"
 #include "BRGameSession.h"
 #include "BRGameMode.h"
 #include "GameFramework/GameModeBase.h"
@@ -17,6 +19,7 @@
 #include "BaseWeapon.h"
 #include "GlobalBalanceData.h"
 #include "UObject/Package.h"
+#include "UObject/UnrealType.h"
 #include "PlayerCharacter.h"
 #include "StaminaComponent.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -45,10 +48,12 @@ void UBRGameInstance::Init()
 		bUseLANOnly ? TEXT("LAN 전용") : TEXT("인터넷 매칭 (Steam)"));
 	UE_LOG(LogTemp, Warning, TEXT("[GameInstance] 모드 변경: 콘솔에서 'SetLANOnly 1' (LAN) 또는 'SetLANOnly 0' (인터넷)"));
 	
-	// PIE 월드 클린업이 엔진의 '월드 참조 검사'보다 먼저 일어나게 등록.
-	// FDelegateHandle/Delegate 헤더 경로 이슈를 피하기 위해 해제하지 않고, 콜백에서 TWeakObjectPtr로만 판별.
+	// S_UserInfo 에셋에서 PlayerName 로드
+	LoadPlayerNameFromUserInfo();
+	
+	// PIE 월드 클린업이 엔진의 '월드 참조 검사'보다 먼저 일어나게 등록. Shutdown에서 Remove.
 	TWeakObjectPtr<UBRGameInstance> Self(this);
-	FWorldDelegates::OnWorldCleanup.AddLambda([Self](UWorld* InWorld, bool bSessionEnding, bool bCleanupResources)
+	OnWorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddLambda([Self](UWorld* InWorld, bool bSessionEnding, bool bCleanupResources)
 	{
 		if (InWorld && InWorld->IsPlayInEditor() && Self.IsValid() && InWorld->GetGameInstance() == Self.Get())
 		{
@@ -68,22 +73,28 @@ void UBRGameInstance::OnStart()
 {
 	Super::OnStart();
 	
-	UE_LOG(LogTemp, Error, TEXT("========================================"));
-	UE_LOG(LogTemp, Error, TEXT("[GameInstance] OnStart 호출 - 첫 번째 World 생성 완료"));
-	UE_LOG(LogTemp, Error, TEXT("========================================"));
-	UE_LOG(LogTemp, Warning, TEXT("[GameInstance] PendingRoomName 상태 확인: %s"), 
-		PendingRoomName.IsEmpty() ? TEXT("비어있음") : *PendingRoomName);
-	
 	UWorld* World = GetWorld();
-	if (World)
+	if (!World) return;
+
+	ENetMode NetMode = World->GetNetMode();
+
+	// 방 생성 흐름(복구)이 아닐 때는 로그 생략 — 일반 시작에서는 OnStart 로그 없음
+	if (PendingRoomName.IsEmpty())
 	{
-		ENetMode NetMode = World->GetNetMode();
-		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] OnStart 시점 NetMode: %s"), 
+		// 상세 로그는 아래 PendingRoomName 분기(방 생성 복구)에서만 출력
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] OnStart — PendingRoomName 감지(방 생성 복구): %s"), *PendingRoomName);
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] OnStart 시점 NetMode: %s"),
 			NetMode == NM_Standalone ? TEXT("Standalone") :
 			NetMode == NM_ListenServer ? TEXT("ListenServer") :
 			NetMode == NM_Client ? TEXT("Client") :
 			NetMode == NM_DedicatedServer ? TEXT("DedicatedServer") : TEXT("Unknown"));
-		
+	}
+	
+	if (World)
+	{
 		// PendingRoomName이 있고 Standalone 모드이면 자동으로 ListenServer 모드로 전환
 		// (방 생성을 위해 서버가 필요하므로)
 		// PendingRoomName이 없으면 Standalone 유지 (클라이언트는 나중에 서버 IP로 연결)
@@ -167,10 +178,7 @@ void UBRGameInstance::OnStart()
 			// ListenServer로 전환되면 함수 종료 (아래 PendingRoomName 로직은 ListenServer 모드에서 실행됨)
 			return;
 		}
-		else if (NetMode == NM_Standalone && PendingRoomName.IsEmpty())
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[GameInstance] Standalone 모드 유지 (클라이언트 모드 - 방 참가 대기 중)"));
-		}
+		// Standalone + PendingRoomName 비어있음 → 위에서 이미 한 줄 로그로 처리, 중복 로그 생략
 	}
 	
 	// PendingRoomName이 있으면 자동으로 세션 생성 시도 (ListenServer 모드에서)
@@ -182,7 +190,7 @@ void UBRGameInstance::OnStart()
 		// 위에서 이미 World 변수를 선언했으므로 재사용
 		if (World)
 		{
-			ENetMode NetMode = World->GetNetMode();
+			NetMode = World->GetNetMode();
 			UE_LOG(LogTemp, Warning, TEXT("[GameInstance] 현재 NetMode: %s"), 
 				NetMode == NM_Standalone ? TEXT("Standalone") :
 				NetMode == NM_ListenServer ? TEXT("ListenServer") :
@@ -532,6 +540,101 @@ void UBRGameInstance::ShowRoomInfo()
 	}
 }
 
+// Seamless Travel 시 GameInstance가 달라질 수 있어, 프로세스 정적 저장소에 백업 (복원 시 사용)
+namespace
+{
+	TMap<FString, TTuple<int32, bool, int32>> G_PendingRoleByName;
+	TArray<TTuple<int32, bool, int32>> G_PendingRoleByIndex;
+}
+
+void UBRGameInstance::SavePendingRolesForTravel(ABRGameState* GameState)
+{
+	if (!GameState) return;
+	PendingRoleRestoreByName.Empty();
+	PendingRoleRestoreByIndex.Empty();
+	G_PendingRoleByName.Empty();
+	G_PendingRoleByIndex.Empty();
+	for (APlayerState* PS : GameState->PlayerArray)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		{
+			FString Key = BRPS->GetPlayerName();
+			if (Key.IsEmpty()) Key = BRPS->UserUID;
+			if (!Key.IsEmpty())
+			{
+				TTuple<int32, bool, int32> Data(BRPS->TeamNumber, BRPS->bIsLowerBody, BRPS->ConnectedPlayerIndex);
+				PendingRoleRestoreByName.Add(Key, Data);
+				G_PendingRoleByName.Add(Key, Data);
+			}
+			G_PendingRoleByIndex.Add(TTuple<int32, bool, int32>(
+				BRPS->TeamNumber, BRPS->bIsLowerBody, BRPS->ConnectedPlayerIndex));
+			PendingRoleRestoreByIndex.Add(TTuple<int32, bool, int32>(
+				BRPS->TeamNumber, BRPS->bIsLowerBody, BRPS->ConnectedPlayerIndex));
+		}
+	}
+	UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] Seamless Travel 전 역할 저장: %d명 (정적+GI)"), G_PendingRoleByIndex.Num());
+}
+
+void UBRGameInstance::RestorePendingRolesFromTravel(ABRGameState* GameState)
+{
+	if (!GameState)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 역할 복원 스킵: GameState 없음"));
+		return;
+	}
+	// GameInstance 데이터가 비어 있으면 정적 백업 사용 (멀티 PIE 등에서 GI가 달라질 수 있음)
+	bool bUseStatic = (PendingRoleRestoreByName.Num() == 0 && PendingRoleRestoreByIndex.Num() == 0);
+	if (bUseStatic && G_PendingRoleByIndex.Num() == 0 && G_PendingRoleByName.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 역할 복원 스킵: 저장된 역할 없음 (GI=%d, 정적=%d)"),
+			PendingRoleRestoreByIndex.Num(), G_PendingRoleByIndex.Num());
+		return;
+	}
+	int32 Restored = 0;
+	auto& NameMap = bUseStatic ? G_PendingRoleByName : PendingRoleRestoreByName;
+	auto& IndexArr = bUseStatic ? G_PendingRoleByIndex : PendingRoleRestoreByIndex;
+	// 1) PlayerName으로 복원 시도
+	for (APlayerState* PS : GameState->PlayerArray)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		{
+			FString Key = BRPS->GetPlayerName();
+			if (Key.IsEmpty()) Key = BRPS->UserUID;
+			const TTuple<int32, bool, int32>* Found = NameMap.Find(Key);
+			if (Found)
+			{
+				BRPS->SetTeamNumber(Found->Get<0>());
+				BRPS->SetPlayerRole(Found->Get<1>(), Found->Get<2>());
+				Restored++;
+			}
+		}
+	}
+	// 2) 이름 매칭 실패 시 인덱스로 폴백
+	if (Restored == 0 && IndexArr.Num() > 0)
+	{
+		const int32 N = FMath::Min(IndexArr.Num(), GameState->PlayerArray.Num());
+		for (int32 i = 0; i < N; i++)
+		{
+			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(GameState->PlayerArray[i]))
+			{
+				const TTuple<int32, bool, int32>& Data = IndexArr[i];
+				BRPS->SetTeamNumber(Data.Get<0>());
+				BRPS->SetPlayerRole(Data.Get<1>(), Data.Get<2>());
+				Restored++;
+			}
+		}
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] Seamless Travel 후 역할 복원: %d명 (인덱스 폴백%s)"), Restored, bUseStatic ? TEXT(", 정적") : TEXT(""));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] Seamless Travel 후 역할 복원: %d명 (이름 매칭%s)"), Restored, bUseStatic ? TEXT(", 정적") : TEXT(""));
+	}
+	PendingRoleRestoreByName.Empty();
+	PendingRoleRestoreByIndex.Empty();
+	G_PendingRoleByName.Empty();
+	G_PendingRoleByIndex.Empty();
+}
+
 /** [핵심] JSON 데이터를 읽어 DT를 갱신하고 에셋으로 저장함 */
 void UBRGameInstance::ReloadAllConfigs()
 {
@@ -826,8 +929,8 @@ void UBRGameInstance::DoPIEExitCleanup(UWorld* World)
 		return;
 	}
 	GI_LOG(Warning, TEXT("PIE 종료 정리(DoPIEExitCleanup) - World 참조 사슬 해제"));
-	
-	// SessionInterface→GameSession→World 참조 끊기
+
+	// 1) SessionInterface→GameSession→World 참조를 가장 먼저 끊음 (UnrealEdEngine 경로의 참조 원인 제거)
 	if (AGameModeBase* GameMode = World->GetAuthGameMode())
 	{
 		if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
@@ -835,11 +938,22 @@ void UBRGameInstance::DoPIEExitCleanup(UWorld* World)
 			GameSession->UnbindSessionDelegatesForPIEExit();
 		}
 	}
-	
+
+	// 2) GEngine/GameSession 델리게이트·위젯 정리 — PC가 월드를 잡지 않도록
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
+		{
+			BRPC->ClearUIForShutdown();
+		}
+	}
+
+	// 3) 타이머 정리 — 콜백이 월드/세션을 잡고 있지 않도록
 	World->GetTimerManager().ClearTimer(ListenServerTimerHandle);
 	World->GetTimerManager().ClearTimer(SessionRecreateTimerHandle);
 	World->GetTimerManager().ClearAllTimersForObject(this);
-	
+
+	// 4) NavigationSystem 정리 (월드 파괴 직전 호출 시 크래시 가능성 있음 — 마지막에 수행)
 	if (UNavigationSystemV1* NavSys = FNavigationSystem::GetCurrent<UNavigationSystemV1>(World))
 	{
 		NavSys->CleanUp();
@@ -848,12 +962,96 @@ void UBRGameInstance::DoPIEExitCleanup(UWorld* World)
 
 void UBRGameInstance::Shutdown()
 {
-	// OnWorldCleanup은 해제하지 않음(FDelegateHandle/헤더 경로 이슈 회피). Shutdown 시점에 한 번 더 정리.
-	UWorld* World = GetWorld();
-	if (World && World->IsPlayInEditor())
+	// 전역 델리게이트 등록 해제 — 해제되지 않으면 엔진이 우리 콜백을 들고 있어 월드 참조 사슬이 남을 수 있음
+	if (OnWorldCleanupHandle.IsValid())
 	{
-		DoPIEExitCleanup(World);
+		FWorldDelegates::OnWorldCleanup.Remove(OnWorldCleanupHandle);
+		OnWorldCleanupHandle.Reset();
+	}
+
+	// PIE 종료 시 모든 PIE 월드에 대해 정리 (GetWorld()만 쓰면 맵 이동 후 null/다른 월드일 수 있음)
+	if (GEngine)
+	{
+		const auto& Contexts = GEngine->GetWorldContexts();
+		for (const FWorldContext& Context : Contexts)
+		{
+			UWorld* World = Context.World();
+			if (World && World->IsPlayInEditor() && Context.OwningGameInstance == this)
+			{
+				DoPIEExitCleanup(World);
+			}
+		}
+	}
+	// 위에서 한 번 정리했어도, 현재 월드가 아직 올라와 있을 수 있으므로 한 번 더
+	UWorld* CurrentWorld = GetWorld();
+	if (CurrentWorld && CurrentWorld->IsPlayInEditor())
+	{
+		DoPIEExitCleanup(CurrentWorld);
 	}
 	
 	Super::Shutdown();
+}
+
+void UBRGameInstance::LoadPlayerNameFromUserInfo()
+{
+	// S_UserInfo 에셋에서 PlayerName 로드 시도
+	// 에셋 경로: /Game/Main/Data/S_UserInfo
+	const FString AssetPath = TEXT("/Game/Main/Data/S_UserInfo.S_UserInfo");
+	
+	UObject* LoadedAsset = StaticLoadObject(UObject::StaticClass(), nullptr, *AssetPath);
+	if (LoadedAsset)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[GameInstance] S_UserInfo 에셋 로드됨. 클래스: %s"), *LoadedAsset->GetClass()->GetName());
+		
+		// 에셋의 모든 속성 나열 (디버그용)
+		for (TFieldIterator<FProperty> PropIt(LoadedAsset->GetClass()); PropIt; ++PropIt)
+		{
+			FProperty* Property = *PropIt;
+			UE_LOG(LogTemp, Log, TEXT("[GameInstance] 속성 발견: %s (타입: %s)"), *Property->GetName(), *Property->GetCPPType());
+		}
+		
+		// PlayerName 속성 찾기 (다양한 이름 시도)
+		TArray<FName> PossibleNames = { FName("PlayerName"), FName("Name"), FName("UserName"), FName("DisplayName") };
+		
+		for (const FName& PropName : PossibleNames)
+		{
+			FProperty* NameProperty = LoadedAsset->GetClass()->FindPropertyByName(PropName);
+			if (NameProperty)
+			{
+				FString LoadedName;
+				if (FStrProperty* StrProp = CastField<FStrProperty>(NameProperty))
+				{
+					LoadedName = StrProp->GetPropertyValue_InContainer(LoadedAsset);
+				}
+				else if (FTextProperty* TextProp = CastField<FTextProperty>(NameProperty))
+				{
+					LoadedName = TextProp->GetPropertyValue_InContainer(LoadedAsset).ToString();
+				}
+				else if (FNameProperty* FNameProp = CastField<FNameProperty>(NameProperty))
+				{
+					LoadedName = FNameProp->GetPropertyValue_InContainer(LoadedAsset).ToString();
+				}
+				
+				if (!LoadedName.IsEmpty())
+				{
+					PlayerName = LoadedName;
+					UE_LOG(LogTemp, Log, TEXT("[GameInstance] S_UserInfo에서 %s 로드 성공: %s"), *PropName.ToString(), *PlayerName);
+					return;
+				}
+			}
+		}
+		
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] S_UserInfo 에셋에서 이름 속성을 찾을 수 없습니다."));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] S_UserInfo 에셋을 로드할 수 없습니다. 경로: %s"), *AssetPath);
+	}
+	
+	// 기본 플레이어 이름 설정 (에셋 로드 실패 시)
+	if (PlayerName.IsEmpty())
+	{
+		PlayerName = FString::Printf(TEXT("Player_%d"), FMath::RandRange(1000, 9999));
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] 기본 PlayerName 설정: %s"), *PlayerName);
+	}
 }

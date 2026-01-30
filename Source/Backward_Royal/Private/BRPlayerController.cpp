@@ -371,6 +371,28 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 {
 	Super::OnPossess(aPawn);
 
+	// Seamless Travel 후 게임 맵에서 GameMode BeginPlay가 호출되지 않을 수 있음 → Possess 시점에 랜덤 팀 적용 예약 (폴백)
+	if (HasAuthority() && aPawn)
+	{
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
+		{
+			if (GI->GetPendingApplyRandomTeamRoles())
+				{
+					ABRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABRGameMode>() : nullptr;
+					if (GM)
+					{
+						FTimerHandle H;
+						GetWorld()->GetTimerManager().SetTimer(H, GM, &ABRGameMode::ApplyRoleChangesForRandomTeams, 1.5f, false);
+						UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] OnPossess 폴백 - 1.5초 후 상체/하체 Pawn 적용 예정"));
+					}
+					else
+					{
+						UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 게임 맵 GameMode가 ABRGameMode가 아님 - 상체/하체 적용이 되지 않을 수 있습니다."));
+					}
+				}
+		}
+	}
+
 	if (OnPawnChanged.IsBound())
 	{
 		OnPawnChanged.Broadcast(aPawn);
@@ -388,8 +410,44 @@ void ABRPlayerController::OnRep_Pawn()
 	}
 }
 
+void ABRPlayerController::ClearUIForShutdown()
+{
+	// PIE 종료 시 월드 참조 잔류 방지: GEngine/GameSession 델리게이트를 먼저 끊는다.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
+		if (AGameModeBase* GameMode = World->GetAuthGameMode())
+		{
+			if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
+			{
+				GameSession->OnCreateSessionComplete.RemoveAll(this);
+			}
+		}
+	}
+	if (GEngine)
+	{
+		GEngine->OnNetworkFailure().RemoveAll(this);
+	}
+
+	if (MainScreenWidget && IsValid(MainScreenWidget))
+	{
+		MainScreenWidget->RemoveFromParent();
+		MainScreenWidget = nullptr;
+	}
+	if (CurrentMenuWidget && IsValid(CurrentMenuWidget))
+	{
+		CurrentMenuWidget->RemoveFromParent();
+		CurrentMenuWidget = nullptr;
+	}
+}
+
 void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// PIE/서버 종료 시 위젯을 먼저 정리 — WBP_MainScreen·WBP_EntranceMenu 등이
+	// GetBRPlayerController → SetMainScreenWidget/CreateRoomWithPlayerName 호출 시
+	// PC가 이미 None이 되어 "Accessed None" 크래시가 나는 것을 줄이기 위함
+	ClearUIForShutdown();
+
 	// BeginPlay UI 타이머 해제 (open ?listen 맵 전환 시 파괴 후 콜백 크래시 방지)
 	if (UWorld* World = GetWorld())
 	{
@@ -412,13 +470,6 @@ void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 				GameSession->OnCreateSessionComplete.RemoveAll(this);
 			}
 		}
-	}
-
-	// 현재 위젯 정리
-	if (CurrentMenuWidget)
-	{
-		CurrentMenuWidget->RemoveFromParent();
-		CurrentMenuWidget = nullptr;
 	}
 	
 	Super::EndPlay(EndPlayReason);
@@ -569,6 +620,14 @@ void ABRPlayerController::CreateRoomWithPlayerName(const FString& RoomName, cons
 	UE_LOG(LogTemp, Error, TEXT("[방 생성] 방 이름: %s, 플레이어 이름: %s"), *RoomName, *PlayerName);
 	UE_LOG(LogTemp, Error, TEXT("========================================"));
 	
+	// GameInstance에 이름 저장 (ServerTravel 후 PostLogin에서 적용 → UserInfo/로비 UI에 정상 반영)
+	if (UWorld* World = GetWorld())
+	{
+		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			BRGI->SetPlayerName(PlayerName);
+		}
+	}
 	// 먼저 플레이어 이름 설정
 	SetPlayerName(PlayerName);
 	// 그 다음 방 생성
@@ -720,6 +779,14 @@ void ABRPlayerController::JoinRoomWithPlayerName(int32 SessionIndex, const FStri
 		UE_LOG(LogTemp, Warning, TEXT("%s"), *Message);
 	}
 	
+	// GameInstance에 이름 저장 (참가 후 PostLogin에서 적용 → UserInfo/로비 UI에 정상 반영)
+	if (UWorld* World = GetWorld())
+	{
+		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			BRGI->SetPlayerName(PlayerName);
+		}
+	}
 	// 먼저 플레이어 이름 설정
 	SetPlayerName(PlayerName);
 	// 그 다음 방 참가
@@ -921,10 +988,16 @@ void ABRPlayerController::ServerRequestRandomTeams_Implementation()
 	{
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 서버에서 직접 실행: 총 %d명의 플레이어"), BRGameState->PlayerArray.Num());
 		BRGameState->AssignRandomTeams();
-		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetWorld()->GetGameInstance()))
+		UBRGameInstance* GI = GetWorld() ? Cast<UBRGameInstance>(GetWorld()->GetGameInstance()) : nullptr;
+		if (GI)
 		{
+			GI->SavePendingRolesForTravel(BRGameState);
 			GI->SetPendingApplyRandomTeamRoles(true);
-			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 게임 맵 이동 시 상체/하체 Pawn 적용 예약됨"));
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 배정] 역할 저장 완료, 게임 맵 이동 시 상체/하체 Pawn 적용 예약"));
+		}
+		else
+		{
+			UE_LOG(LogTemp, Error, TEXT("[랜덤 팀 배정] GameInstance 없음 - 역할 저장 스킵, 상체/하체 복원 실패 가능"));
 		}
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 배정] 완료"));
 	}
@@ -975,10 +1048,17 @@ void ABRPlayerController::ServerRequestStartGame_Implementation()
 
 void ABRPlayerController::ServerSetPlayerName_Implementation(const FString& NewPlayerName)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[로비이름] ServerSetPlayerName 수신 | NewPlayerName='%s' | HasAuthority=%d"), *NewPlayerName, HasAuthority() ? 1 : 0);
 	if (ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>())
 	{
+		FString OldName = BRPS->GetPlayerName();
+		FString OldUID = BRPS->UserUID;
 		BRPS->SetPlayerNameString(NewPlayerName);
-		UE_LOG(LogTemp, Log, TEXT("[플레이어 이름 설정] 서버에서 설정: %s"), *NewPlayerName);
+		UE_LOG(LogTemp, Warning, TEXT("[로비이름] ServerSetPlayerName 적용 | 이전 PlayerName='%s' UserUID='%s' → 새 PlayerName='%s'"), *OldName, *OldUID, *BRPS->GetPlayerName());
+		if (ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>())
+		{
+			GS->UpdatePlayerList(); // 복제 목록 갱신 → 모든 클라이언트에 새 이름 반영
+		}
 	}
 }
 
@@ -1002,6 +1082,60 @@ void ABRPlayerController::ServerSetPlayerRole_Implementation(bool bLowerBody)
 	}
 }
 
+void ABRPlayerController::RequestAssignToLobbyTeam(int32 TeamIndex, int32 SlotIndex)
+{
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	if (!GS) return;
+	if (HasAuthority())
+	{
+		APlayerState* PS = GetPlayerState<APlayerState>();
+		int32 PlayerIndex = PS ? GS->PlayerArray.Find(PS) : INDEX_NONE;
+		if (PlayerIndex != INDEX_NONE && GS->AssignPlayerToLobbyTeam(PlayerIndex, TeamIndex, SlotIndex))
+		{
+			UE_LOG(LogTemp, Log, TEXT("[로비] 플레이어 %d -> 팀 %d 슬롯 %d 배치"), PlayerIndex, TeamIndex + 1, SlotIndex + 1);
+		}
+		return;
+	}
+	ServerRequestAssignToLobbyTeam(TeamIndex, SlotIndex);
+}
+
+void ABRPlayerController::RequestMoveToLobbyEntry(int32 TeamIndex, int32 SlotIndex)
+{
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	if (!GS) return;
+	if (HasAuthority())
+	{
+		if (GS->MovePlayerToLobbyEntry(TeamIndex, SlotIndex))
+		{
+			UE_LOG(LogTemp, Log, TEXT("[로비] 팀 %d 슬롯 %d -> Entry 이동"), TeamIndex + 1, SlotIndex + 1);
+		}
+		return;
+	}
+	ServerRequestMoveToLobbyEntry(TeamIndex, SlotIndex);
+}
+
+void ABRPlayerController::ServerRequestAssignToLobbyTeam_Implementation(int32 TeamIndex, int32 SlotIndex)
+{
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	if (!GS || !HasAuthority()) return;
+	APlayerState* PS = GetPlayerState<APlayerState>();
+	int32 PlayerIndex = PS ? GS->PlayerArray.Find(PS) : INDEX_NONE;
+	if (PlayerIndex != INDEX_NONE && GS->AssignPlayerToLobbyTeam(PlayerIndex, TeamIndex, SlotIndex))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[로비] 서버: 플레이어 %d -> 팀 %d 슬롯 %d 배치"), PlayerIndex, TeamIndex + 1, SlotIndex + 1);
+	}
+}
+
+void ABRPlayerController::ServerRequestMoveToLobbyEntry_Implementation(int32 TeamIndex, int32 SlotIndex)
+{
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	if (!GS || !HasAuthority()) return;
+	if (GS->MovePlayerToLobbyEntry(TeamIndex, SlotIndex))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[로비] 서버: 팀 %d 슬롯 %d -> Entry 이동"), TeamIndex + 1, SlotIndex + 1);
+	}
+}
+
 void ABRPlayerController::ClientNotifyGameStarting_Implementation()
 {
 	UE_LOG(LogTemp, Log, TEXT("[게임 시작] 클라이언트: 게임 시작 알림 수신 - 맵 이동 대기 중..."));
@@ -1009,6 +1143,28 @@ void ABRPlayerController::ClientNotifyGameStarting_Implementation()
 	// 클라이언트에서 입력을 일시적으로 중지 (선택사항)
 	// 실제로는 ServerTravel이 자동으로 클라이언트를 따라오므로 특별한 처리가 필요하지 않을 수 있습니다
 	// 하지만 로그를 남겨서 알림이 도착했는지 확인할 수 있습니다
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			GI->ClearCachedRoomTitle();
+		}
+	}
+}
+
+void ABRPlayerController::ClientReceiveRoomTitle_Implementation(const FString& RoomTitle)
+{
+	UE_LOG(LogTemp, Log, TEXT("[방 제목] 클라이언트 수신: %s"), *RoomTitle);
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			GI->SetCachedRoomTitle(RoomTitle);
+			GI->OnRoomTitleReceived.Broadcast();
+		}
+	}
 }
 
 void ABRPlayerController::RequestRandomTeams()
@@ -1102,6 +1258,7 @@ void ABRPlayerController::RequestChangePlayerTeam(int32 PlayerIndex, int32 NewTe
 
 void ABRPlayerController::SetPlayerName(const FString& NewPlayerName)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[로비이름] SetPlayerName 호출 | NewPlayerName='%s' | HasAuthority=%d (0=클라이언트→서버 RPC 전송)"), *NewPlayerName, HasAuthority() ? 1 : 0);
 	if (HasAuthority())
 	{
 		if (ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>())
@@ -1502,9 +1659,22 @@ void ABRPlayerController::SetMainScreenToEntranceMenu()
 
 void ABRPlayerController::SetMainScreenToLobbyMenu()
 {
+	UWorld* World = GetWorld();
+	// 클라이언트가 로비 맵에 도착한 뒤 한 번 더 이름 전송 → 서버에 ServerSetPlayerName 반영 (맵 이동 전 RPC 유실 대비)
+	if (World && World->GetNetMode() == NM_Client && IsLocalController())
+	{
+		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
+		{
+			FString Name = BRGI->GetPlayerName();
+			if (!Name.IsEmpty())
+			{
+				SetPlayerName(Name);
+				UE_LOG(LogTemp, Log, TEXT("[로비이름] 클라이언트 로비 진입 시 이름 재전송: '%s'"), *Name);
+			}
+		}
+	}
 	// Standalone 모드에서는 일반적으로 LobbyMenu를 표시하지 않지만,
 	// 방 생성 후 ServerTravel로 인한 재로드인 경우는 예외
-	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() == NM_Standalone)
 	{
 		// 방 생성 후 재로드 상태인지 확인
@@ -1620,6 +1790,49 @@ void ABRPlayerController::HideCurrentMenu()
 		CurrentMenuWidget->RemoveFromParent();
 		CurrentMenuWidget = nullptr;
 		UE_LOG(LogTemp, Log, TEXT("[PlayerController] 현재 메뉴 숨김"));
+	}
+}
+
+void ABRPlayerController::LeaveRoom()
+{
+	UWorld* World = GetWorld();
+	if (!World || !IsLocalController())
+	{
+		return;
+	}
+
+	ENetMode NetMode = World->GetNetMode();
+
+	// 클라이언트: 서버 연결을 끊으면 서버에서 Logout(Exiting)이 호출되어 PlayerArray에서 제거됨
+	if (NetMode == NM_Client)
+	{
+		ConsoleCommand(TEXT("disconnect"));
+		UE_LOG(LogTemp, Log, TEXT("[방 나가기] 클라이언트: 서버 연결 종료 요청"));
+		return;
+	}
+
+	// 호스트(ListenServer): 세션을 종료하고 메인 맵으로 이동 (모든 클라이언트도 함께 이동)
+	if (NetMode == NM_ListenServer)
+	{
+		if (AGameModeBase* GameMode = World->GetAuthGameMode())
+		{
+			if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
+			{
+				GameSession->DestroySessionAndReturnToMainMenu();
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[방 나가기] 호스트: BRGameSession을 찾을 수 없습니다."));
+			}
+		}
+		return;
+	}
+
+	// Standalone: UI만 전환 (연결 없음)
+	if (NetMode == NM_Standalone)
+	{
+		SetMainScreenToEntranceMenu();
+		UE_LOG(LogTemp, Log, TEXT("[방 나가기] Standalone: 입장 메뉴로 전환"));
 	}
 }
 

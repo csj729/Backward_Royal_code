@@ -40,11 +40,11 @@ void ABRGameMode::BeginPlay()
 	}
 
 	// 로비에서 랜덤 팀 배정 후 예약된 경우: 게임 맵 로드 후 플레이어 스폰이 끝날 때까지 지연 후 적용
+	// 플래그는 ApplyRoleChangesForRandomTeams에서만 클리어 (여기서 지우면 1.5초 후 타이머에서 진입 시 플래그가 false라 적용이 스킵됨)
 	if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
 	{
 		if (GI->GetPendingApplyRandomTeamRoles())
 		{
-			GI->ClearPendingApplyRandomTeamRoles();
 			FTimerHandle H;
 			GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 1.5f, false);
 			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 게임 맵 로드됨 - 1.5초 후 상체/하체 Pawn 적용 예정"));
@@ -65,73 +65,109 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 	{
 		// [보존] 플레이어 이름 설정 및 로그
 		FString PlayerName = BRPS->GetPlayerName();
+		UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin 진입 | bIsLocalPlayer 판단 전 | GetPlayerName()='%s'"), *PlayerName);
+
 		if (PlayerName.IsEmpty())
 		{
 			PlayerName = FString::Printf(TEXT("Player %d"), BRGameState->PlayerArray.Num());
+			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | PlayerName 비어있어 기본값 사용: '%s'"), *PlayerName);
 		}
 
-		// GameInstance에서 플레이어 이름 가져오기
-		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
+		// GameInstance 이름은 이 머신의 로컬 플레이어(호스트/Standalone)일 때만 적용.
+		// 클라이언트 입장 시 서버의 GI는 호스트 이름이므로, 원격 클라이언트에 호스트 이름을 덮어쓰지 않음.
+		UWorld* WorldForCheck = GetWorld();
+		const bool bIsLocalPlayer = WorldForCheck && (WorldForCheck->GetNetMode() == NM_Standalone || NewPlayer->IsLocalController());
+		UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+		UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | bIsLocalPlayer=%d | NetMode=%d | IsLocalController=%d"),
+			bIsLocalPlayer ? 1 : 0, WorldForCheck ? (int32)WorldForCheck->GetNetMode() : -1, NewPlayer->IsLocalController() ? 1 : 0);
+
+		if (bIsLocalPlayer && GI)
 		{
 			FString SavedPlayerName = GI->GetPlayerName();
+			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 로컬 플레이어 → GI->GetPlayerName()='%s'"), *SavedPlayerName);
 			if (!SavedPlayerName.IsEmpty())
 			{
 				PlayerName = SavedPlayerName;
 				BRPS->SetPlayerName(PlayerName);
+				UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 로컬: BRPS->SetPlayerName('%s') 적용"), *PlayerName);
 			}
+		}
+		// 원격 클라이언트: 이름을 "Player N"으로 덮어쓰지 않음. 빈/PC이름이면 그대로 두고 ServerSetPlayerName 도착 시 실제 이름으로 갱신 → UI는 공란 후 PlayerName 표시
+		if (!bIsLocalPlayer)
+		{
+			const FString CurrentName = BRPS->GetPlayerName();
+			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 원격 클라이언트: GetPlayerName() 유지 '%s' (ServerSetPlayerName 도착 시 갱신)"), *CurrentName);
 		}
 
 		// UserUID 설정 (GameInstance에서 가져오거나 생성)
-		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
+		if (GI)
 		{
 			// UserUID가 비어있으면 자동 생성 (예: Steam ID, 계정 ID 등)
 			FString UserUID = FString::Printf(TEXT("Player_%d_%s"), 
 				BRGameState->PlayerArray.Num() - 1, 
 				*FDateTime::Now().ToString());
 			BRPS->SetUserUID(UserUID);
+			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | SetUserUID('%s') | 최종 PlayerName='%s'"), *UserUID, *BRPS->GetPlayerName());
 		}
 
-		// 클라이언트 연결 확인 (Standalone 모드에서도 확인 가능)
+		// 클라이언트 연결 확인 — 방 생성(ListenServer/Dedicated) 시에만 상세 로그, Standalone은 최소 로그
 		UWorld* World = GetWorld();
 		ENetMode NetMode = World ? World->GetNetMode() : NM_Standalone;
 		FString NetModeString = NetMode == NM_ListenServer ? TEXT("ListenServer") : 
 		                       NetMode == NM_DedicatedServer ? TEXT("DedicatedServer") : 
 		                       NetMode == NM_Client ? TEXT("Client") : TEXT("Standalone");
 		
-		UE_LOG(LogTemp, Warning, TEXT("========================================"));
-		UE_LOG(LogTemp, Warning, TEXT("[서버] 클라이언트 입장 확인!"));
-		UE_LOG(LogTemp, Warning, TEXT("========================================"));
-		UE_LOG(LogTemp, Warning, TEXT("[서버] 플레이어 이름: %s"), *PlayerName);
-		UE_LOG(LogTemp, Warning, TEXT("[서버] 현재 인원: %d/%d"), BRGameState->PlayerArray.Num(), BRGameState->MaxPlayers);
-		UE_LOG(LogTemp, Warning, TEXT("[서버] 네트워크 모드: %s"), *NetModeString);
-		
-		// 리슨 서버 모드 확인
-		if (NetMode == NM_ListenServer)
+		if (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer)
 		{
+			UE_LOG(LogTemp, Warning, TEXT("========================================"));
+			UE_LOG(LogTemp, Warning, TEXT("[서버] 클라이언트 입장 확인!"));
+			UE_LOG(LogTemp, Warning, TEXT("========================================"));
+			UE_LOG(LogTemp, Warning, TEXT("[서버] 플레이어 이름: %s"), *PlayerName);
+			UE_LOG(LogTemp, Warning, TEXT("[서버] 현재 인원: %d/%d"), BRGameState->PlayerArray.Num(), BRGameState->MaxPlayers);
+			UE_LOG(LogTemp, Warning, TEXT("[서버] 네트워크 모드: %s"), *NetModeString);
 			UE_LOG(LogTemp, Warning, TEXT("[서버] ✅ 리슨 서버 모드로 정상 실행 중입니다!"));
 			UE_LOG(LogTemp, Warning, TEXT("[서버] 클라이언트 연결을 받을 수 있는 상태입니다."));
+			if (GEngine)
+			{
+				FString JoinMsg = FString::Printf(TEXT("[서버] %s 입장! (인원: %d/%d)"), 
+					*PlayerName, BRGameState->PlayerArray.Num(), BRGameState->MaxPlayers);
+				GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, JoinMsg);
+			}
 		}
-		else if (NetMode == NM_Standalone)
+		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[서버] ⚠️ Standalone 모드입니다. 리슨 서버 모드가 아닙니다."));
-			UE_LOG(LogTemp, Warning, TEXT("[서버] 클라이언트가 접속할 수 없습니다. 리슨 서버로 전환하세요."));
+			// Standalone: 방 생성 전이므로 상세 로그 생략
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] %s (Standalone — 방 생성 버튼으로 세션 생성)"), *PlayerName);
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] 참고: 실제 방(세션)을 만들려면 'CreateRoom [방이름]' 명령어 또는 방 생성 버튼을 사용하세요."));
 		}
-		
-		// 화면에 입장 메시지 표시
-		if (GEngine)
-		{
-			FString JoinMsg = FString::Printf(TEXT("[서버] %s 입장! (인원: %d/%d)"), 
-				*PlayerName, BRGameState->PlayerArray.Num(), BRGameState->MaxPlayers);
-			GEngine->AddOnScreenDebugMessage(-1, 10.0f, FColor::Green, JoinMsg);
-		}
-		
-		UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] 참고: 실제 방(세션)을 만들려면 'CreateRoom [방이름]' 명령어를 사용하세요."));
 
-		// [보존] 방장 설정
-		if (BRGameState->PlayerArray.Num() == 1)
+		// [보존] 방장 설정 — ListenServer/DedicatedServer에서만 적용 (Standalone은 방 생성 버튼 누를 때만 방 생성)
+		if (BRGameState->PlayerArray.Num() == 1 && (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer))
 		{
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] 첫 번째 플레이어이므로 방장으로 설정됩니다."));
 			BRPS->SetIsHost(true);
+			// 방 제목을 서버에서 설정·복제하여 입장한 클라이언트도 "○○'s Game"으로 동일하게 표시
+			FString RoomTitleStr = PlayerName.IsEmpty() ? FString(TEXT("Host's Game")) : (PlayerName + TEXT("'s Game"));
+			BRGameState->SetRoomTitle(RoomTitleStr);
+		}
+		else if (BRGameState->PlayerArray.Num() > 1 && (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer))
+		{
+			// 입장한 클라이언트에게 RPC로 방 제목 즉시 전달 (복제 대기 없이 "○○'s Game" 표시)
+			FString RoomTitleStr = BRGameState->RoomTitle.IsEmpty()
+				? (BRGameState->GetHostPlayerName() + TEXT("'s Game"))
+				: BRGameState->RoomTitle;
+			if (RoomTitleStr.IsEmpty() || RoomTitleStr == TEXT("'s Game"))
+			{
+				RoomTitleStr = TEXT("Host's Game");
+			}
+			if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(NewPlayer))
+			{
+				BRPC->ClientReceiveRoomTitle(RoomTitleStr);
+			}
+		}
+		else if (BRGameState->PlayerArray.Num() == 1 && NetMode == NM_Standalone)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] Standalone 모드 — 방 생성 버튼을 누르면 방장이 됩니다."));
 		}
 
 		// [보존] 플레이어 역할 할당 로직
@@ -282,31 +318,39 @@ void ABRGameMode::Logout(AController* Exiting)
 		}
 	}
 
+	// Super::Logout 전에 PlayerArray에서 퇴장한 PlayerState를 먼저 제거.
+	// 그래야 즉시 UpdatePlayerList()를 호출해도 나간 이름이 목록에서 빠짐.
+	// (타이머로 미루면 클라이언트 입장 시 등 다른 상황에서 크래시 가능)
+	ABRGameState* BRGameState = GetGameState<ABRGameState>();
+	if (BRGameState)
+	{
+		if (APlayerState* ExitingPS = Exiting->GetPlayerState<APlayerState>())
+		{
+			BRGameState->PlayerArray.Remove(ExitingPS);
+		}
+	}
+
 	Super::Logout(Exiting);
 
-	// 플레이어 목록 업데이트 (역할 재할당은 로비 퇴장 시에는 기존 순서 유지)
-	if (ABRGameState* BRGameState = GetGameState<ABRGameState>())
+	// 플레이어 목록 업데이트 및 역할 재할당 (즉시 실행, 타이머 없음)
+	if (BRGameState)
 	{
 		BRGameState->UpdatePlayerList();
-		
-		// 남은 플레이어들의 역할 재할당 (순서대로)
+
 		for (int32 i = 0; i < BRGameState->PlayerArray.Num(); i++)
 		{
 			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(BRGameState->PlayerArray[i]))
 			{
 				if (i == 0)
 				{
-					// 첫 번째 플레이어 = 하체
 					BRPS->SetPlayerRole(true, -1);
 				}
 				else if (i % 2 == 0)
 				{
-					// 홀수 번째 플레이어 (인덱스가 짝수) = 하체
 					BRPS->SetPlayerRole(true, -1);
 				}
 				else
 				{
-					// 짝수 번째 플레이어 = 이전 플레이어의 상체
 					int32 LowerBodyPlayerIndex = i - 1;
 					if (LowerBodyPlayerIndex >= 0 && LowerBodyPlayerIndex < BRGameState->PlayerArray.Num())
 					{
@@ -326,8 +370,18 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 {
 	if (!HasAuthority() || !UpperBodyClass) return;
 
+	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+	if (!GI || !GI->GetPendingApplyRandomTeamRoles())
+		return;
+	GI->ClearPendingApplyRandomTeamRoles();
+
+	UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] ApplyRoleChangesForRandomTeams 진입 (1.5초 타이머)"));
+
 	ABRGameState* BRGameState = GetGameState<ABRGameState>();
 	if (!BRGameState || BRGameState->PlayerArray.Num() < 2) return;
+
+	// Seamless Travel 후 PlayerState가 초기화될 수 있으므로, 저장해 둔 팀/역할을 복원
+	GI->RestorePendingRolesFromTravel(BRGameState);
 
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -349,45 +403,45 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 	const int32 NumTeams = NumPlayers / 2;
 	if (NumTeams < 1) return;
 
-	// 현재 월드에 있는 하체(APlayerCharacter) Pawn 수집 (순서 = PlayerArray 순)
-	// 로비에서 전원 하체로 스폰된 경우 N개가 되므로, 팀 수(NumTeams)만큼만 사용
-	TArray<APlayerCharacter*> AllLowerChars;
-	for (APlayerState* PS : BRGameState->PlayerArray)
+	// 상체로 지정된 플레이어들의 기존(하체) Pawn만 먼저 제거 → 팀당 1개 하체 몸통만 남김
+	for (int32 TeamIndex = 0; TeamIndex < NumTeams; TeamIndex++)
 	{
-		APlayerController* PC = Cast<APlayerController>(PS->GetOwner());
-		if (!PC) continue;
-		APawn* P = PC->GetPawn();
-		if (APlayerCharacter* LC = Cast<APlayerCharacter>(P))
-			AllLowerChars.Add(LC);
-	}
-	if (AllLowerChars.Num() < NumTeams)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 하체 Pawn 수(%d)가 팀 수(%d)보다 적어 중단"), AllLowerChars.Num(), NumTeams);
-		return;
-	}
-	// 사용하지 않는 하체(AllLowerChars[NumTeams] 이상)는 먼저 제거 → 팀당 1개 몸통만 남김
-	for (int32 i = NumTeams; i < AllLowerChars.Num(); i++)
-	{
-		APlayerCharacter* ExtraLower = AllLowerChars[i];
-		if (!ExtraLower || !IsValid(ExtraLower)) continue;
-		AController* LowerController = ExtraLower->GetController();
-		if (LowerController)
+		ABRPlayerState* UpperPS = SortedByTeam[2 * TeamIndex + 1];
+		if (UpperPS && !UpperPS->bIsLowerBody) // 상체인 경우만
 		{
-			LowerController->UnPossess();
+			APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwner());
+			if (UpperPC)
+			{
+				APawn* OldPawn = UpperPC->GetPawn();
+				UpperPC->UnPossess();
+				if (OldPawn && IsValid(OldPawn))
+					OldPawn->Destroy();
+			}
 		}
-		ExtraLower->Destroy();
 	}
 
 	for (int32 TeamIndex = 0; TeamIndex < NumTeams; TeamIndex++)
 	{
 		ABRPlayerState* LowerPS = SortedByTeam[2 * TeamIndex];
 		ABRPlayerState* UpperPS = SortedByTeam[2 * TeamIndex + 1];
+		// 역할이 서버에 올바르게 적용되었는지 확인 (하체→상체 순서)
+		if (LowerPS->bIsLowerBody == false || UpperPS->bIsLowerBody == true)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 역할 불일치 - 하체:%s 상체:%s, 스킵"), TeamIndex + 1,
+				LowerPS->bIsLowerBody ? TEXT("Y") : TEXT("N"), UpperPS->bIsLowerBody ? TEXT("Y") : TEXT("N"));
+			continue;
+		}
 		APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwner());
 		APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwner());
 		if (!LowerPC || !UpperPC) continue;
 
-		APlayerCharacter* LowerChar = AllLowerChars[TeamIndex];
-		if (!LowerChar) continue;
+		// 하체 플레이어가 현재 소유한 Pawn 사용 (가입 순서가 아닌 역할 기준)
+		APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());
+		if (!LowerChar || !IsValid(LowerChar))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 하체 플레이어 %s의 Pawn 없음, 스킵"), TeamIndex + 1, *LowerPS->GetPlayerName());
+			continue;
+		}
 
 		// 하체가 해당 LowerChar를 소유하도록
 		if (LowerPC->GetPawn() != LowerChar)
@@ -520,6 +574,16 @@ void ABRGameMode::StartGame()
 	{
 		UE_LOG(LogTemp, Error, TEXT("[게임 시작] 실패: World를 찾을 수 없습니다."));
 		return;
+	}
+	
+	// Travel 직전에 역할 저장 (PC 쪽 저장이 실패해도 여기서 한 번 더 저장, PIE/멀티 프로세스 대응)
+	if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
+	{
+		if (ABRGameState* GS = GetGameState<ABRGameState>())
+		{
+			GI->SavePendingRolesForTravel(GS);
+			UE_LOG(LogTemp, Warning, TEXT("[게임 시작] Travel 직전 역할 저장 완료 (GameMode)"));
+		}
 	}
 	
 	// PIE(Play In Editor) 환경 감지

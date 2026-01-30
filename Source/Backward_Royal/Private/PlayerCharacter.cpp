@@ -166,11 +166,33 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-		const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-		const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+		// 카메라 기준 앞/오른쪽 방향
+		const FVector CameraForward = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+		const FVector CameraRight = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-		AddMovementInput(ForwardDirection, MovementVector.Y);
-		AddMovementInput(RightDirection, MovementVector.X);
+		// [신규 로직 시작] ----------------------------------------------------------
+
+		// 1. 플레이어가 입력한 키(W,A,S,D)가 실제 월드에서 어느 방향인지 계산
+		FVector IntentDir = (CameraForward * MovementVector.Y + CameraRight * MovementVector.X).GetSafeNormal();
+
+		// 2. 내적(Dot Product) 계산
+		// 캐릭터의 정면(GetActorForwardVector)과 이동하려는 방향(IntentDir)을 비교
+		// 결과가 양수(+)면 캐릭터가 보는 방향으로 걷는 것이고, 음수(-)면 뒷걸음질 치는 것
+		float Dot = FVector::DotProduct(IntentDir, GetActorForwardVector());
+
+		float SpeedScale = 1.0f;
+
+		// 3. 캐릭터가 바라보는 방향으로 움직일 때 (내적이 0보다 클 때)
+		// 현재 캐릭터는 카메라 등 뒤를 보고 있으므로, S키를 눌러 카메라 쪽으로 올 때가 여기에 해당됨
+		if (Dot > 0.1f)
+		{
+			SpeedScale = 0.5f; // 0.5배속 적용
+		}
+		// [신규 로직 끝] ------------------------------------------------------------
+
+		// 계산된 배율(SpeedScale)을 곱해서 이동 적용
+		AddMovementInput(CameraForward, MovementVector.Y * SpeedScale);
+		AddMovementInput(CameraRight, MovementVector.X * SpeedScale);
 	}
 }
 

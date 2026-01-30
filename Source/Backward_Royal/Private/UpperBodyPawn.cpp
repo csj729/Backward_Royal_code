@@ -1,6 +1,7 @@
 ﻿#include "UpperBodyPawn.h"
 #include "PlayerCharacter.h"
 #include "DropItem.h"
+#include "BaseWeapon.h"
 #include "InteractableInterface.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/SpringArmComponent.h"
@@ -273,71 +274,72 @@ void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 		if (!ParentBodyCharacter) return;
 	}
 
-	// =================================================================
-	// [수정됨] 레이캐스트 시작점: 카메라 -> 머리 메쉬의 'head' 소켓 위치
-	// =================================================================
+	// 2. 트레이스 시작점 및 끝점 설정
 	FVector Start;
-
-	// 'head'라는 뼈(소켓)가 존재하면 그 위치를 사용
 	if (ParentBodyCharacter->GetMesh() && ParentBodyCharacter->GetMesh()->DoesSocketExist(TEXT("head")))
 	{
 		Start = ParentBodyCharacter->HeadMountPoint->GetComponentLocation();
 	}
 	else
 	{
-		// 만약 소켓을 못 찾으면 안전하게 카메라 위치 사용 (혹은 로그 출력)
 		Start = FrontCamera->GetComponentLocation();
-		BODY_LOG(Warning, TEXT("Cannot find 'head' socket on HeadMesh. Using Camera location instead."));
 	}
 
-	// 방향: 카메라는 계속 정면을 보고 있으므로, 카메라의 Forward Vector를 사용합니다.
 	FVector End = Start + (FrontCamera->GetForwardVector() * InteractionDistance);
 
+	// 3. 트레이스 설정 및 현재 장착 무기 제외
 	FHitResult HitResult;
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(this);
 	QueryParams.AddIgnoredActor(ParentBodyCharacter);
 
-	// 3. 레이캐스트 발사 (무기와 아이템 모두 Visibility 채널 Block 설정이 되어있어야 함)
-	bool bHit = GetWorld()->LineTraceSingleByChannel(
+	// [핵심 추가] 현재 손에 들고 있는 무기가 있다면 트레이스 대상에서 제외
+	if (ParentBodyCharacter->CurrentWeapon)
+	{
+		QueryParams.AddIgnoredActor(ParentBodyCharacter->CurrentWeapon);
+	}
+
+	// 구체 반지름 설정
+	float TraceRadius = 25.0f;
+
+	// Sphere Trace 실행
+	bool bHit = GetWorld()->SweepSingleByChannel(
 		HitResult,
 		Start,
 		End,
+		FQuat::Identity,
 		ECC_Visibility,
+		FCollisionShape::MakeSphere(TraceRadius),
 		QueryParams
 	);
 
-	// =================================================================
-	// [테스트 2] 레이캐스트 시각화
-	// =================================================================
-	if (bHit)
-	{
-		DrawDebugLine(GetWorld(), Start, End, FColor::Green, false, 2.0f, 0, 1.0f);
-		DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, 10.0f, 12, FColor::Green, false, 2.0f);
-	}
-	else
-	{
-		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 2.0f, 0, 1.0f);
-	}
-
-	// 4. 아이템/무기 확인 및 상호작용
+	// 4. 시각화 및 상호작용 로직
 	if (bHit)
 	{
 		AActor* HitActor = HitResult.GetActor();
 
-		// 이를 통해 무기(BaseWeapon)와 아이템(DropItem) 모두 상호작용 가능해짐
+		// 인터페이스 구현 여부 확인
 		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
 		{
-			// [수정됨] 직접 호출 대신 서버에 상호작용 요청 (소유권 문제 해결)
-			ServerRequestInteract(HitActor);
-
-			if (GEngine)
+			// 이미 들고 있는 무기를 다시 줍는 것을 방지하기 위한 안전장치 (선택 사항)
+			if (HitActor != ParentBodyCharacter->CurrentWeapon)
 			{
-				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
-					FString::Printf(TEXT("Requesting Server Interact: %s"), *HitActor->GetName()));
+				ServerRequestInteract(HitActor);
+
+				if (GEngine)
+				{
+					GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+						FString::Printf(TEXT("Requesting Server Interact: %s"), *HitActor->GetName()));
+				}
 			}
-			BODY_LOG(Log, TEXT("Server interaction requested for %s"), *HitActor->GetName());
 		}
+
+		DrawDebugLine(GetWorld(), Start, HitResult.ImpactPoint, FColor::Green, false, 2.0f, 0, 1.5f);
+		DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, TraceRadius, 12, FColor::Green, false, 2.0f);
+	}
+	else
+	{
+		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 2.0f, 0, 1.0f);
 	}
 }
 

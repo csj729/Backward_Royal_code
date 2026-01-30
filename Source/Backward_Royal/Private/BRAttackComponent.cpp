@@ -30,6 +30,12 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
     ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
     if (!OwnerChar) return;
 
+    // 클라이언트에서 호출되었더라도 실제 물리 설정 변경은 서버 RPC를 통해 서버에서 실행되어야 함
+    if (!GetOwner()->HasAuthority())
+    {
+        ServerSetAttackDetection(bEnabled);
+    }
+
     // 1. 무기가 있는 경우 (기존 로직)
     if (OwnerChar->CurrentWeapon)
     {
@@ -38,9 +44,32 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
         {
             if (bEnabled)
             {
-                WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-                WeaponMesh->SetCollisionResponseToAllChannels(ECR_Block);
-                WeaponMesh->SetNotifyRigidBodyCollision(true);
+                if (bEnabled)
+                {
+                    // 공격 활성화 시
+                    // 서버에서만 물리 설정을 변경하도록 보장
+                    if (GetOwner()->HasAuthority())
+                    {
+                        WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+                        WeaponMesh->SetCollisionResponseToAllChannels(ECR_Block);
+
+                        // 캐릭터 본인 및 상체 Pawn과의 물리 충돌 무시 설정
+                        WeaponMesh->IgnoreActorWhenMoving(OwnerChar, true);
+
+                        TArray<AActor*> AttachedActors;
+                        OwnerChar->GetAttachedActors(AttachedActors);
+                        for (AActor* Attached : AttachedActors)
+                        {
+                            WeaponMesh->IgnoreActorWhenMoving(Attached, true);
+                        }
+                        WeaponMesh->SetNotifyRigidBodyCollision(true);
+                    }
+
+                    if (!WeaponMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
+                    {
+                        WeaponMesh->OnComponentHit.AddDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
+                    }
+                }
 
                 if (!WeaponMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
                 {
@@ -49,7 +78,15 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
             }
             else
             {
-                WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                if (GetOwner()->HasAuthority())
+                {
+                    // 무기가 아직 장착된 상태인지 확인하는 방어 코드 추가
+                    if (OwnerChar->CurrentWeapon && OwnerChar->CurrentWeapon->GetAttachParentActor() == OwnerChar)
+                    {
+                        WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+                        WeaponMesh->SetNotifyRigidBodyCollision(false);
+                    }
+                }
                 WeaponMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
                 HitActors.Empty();
             }
@@ -147,33 +184,42 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     {
         CalculatedDamage = ImpactForce * 0.001f;
     }
-	UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
 
-    if (OwnerChar && OwnerChar->CurrentWeapon)
+    if (CalculatedDamage >= 5.0f)
     {
-        // 무기가 있을 때만 내구도를 감소시킴
-        MyWeapon->DecreaseDurability(CalculatedDamage);
+        UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
+        if (MyWeapon)
+        {
+            // 무기가 있을 때만 내구도를 감소시킴
+            MyWeapon->DecreaseDurability(CalculatedDamage);
+        }
+
+        GEngine->AddOnScreenDebugMessage(
+            -1,
+            2.f,
+            FColor::Green,
+            FString::Printf(TEXT("데미지 적용 -> 대상: %s, 피해량: %.1f"), *OtherActor->GetName(), CalculatedDamage)
+        );
     }
 
-    ////
+    if (GetOwner()->HasAuthority() && OtherComp)
+    {
+        // 타격 방향 계산 (충돌 법선 벡터의 반대 방향)
+        FVector ImpulseDir = -Hit.ImpactNormal;
+        if (ImpulseDir.IsNearlyZero()) ImpulseDir = OwnerChar->GetActorForwardVector();
 
-    // 충격량 계산
-	if (OtherComp && OtherComp->IsSimulatingPhysics())
-	{
-        if(MyWeapon)
-		    OtherComp->AddImpulseAtLocation(-Hit.ImpactNormal * ImpactForce * ABaseWeapon::GlobalImpulseMultiplier * MyWeapon->CurrentWeaponData.MassKg * MyWeapon->CurrentWeaponData.ImpulseCoefficient, Hit.ImpactPoint);
-        else
-            OtherComp->AddImpulseAtLocation(-Hit.ImpactNormal * ImpactForce, Hit.ImpactPoint);
-	}
+        // 물리 시뮬레이션 중인 대상 (시체 또는 오브젝트)
+        if (OtherComp->IsSimulatingPhysics())
+        {
+            float ImpulseMultiplier = (MyWeapon) ? (ABaseWeapon::GlobalImpulseMultiplier * MyWeapon->CurrentWeaponData.MassKg * MyWeapon->CurrentWeaponData.ImpulseCoefficient) : 1.0f;
+
+            // 힘이 너무 약하면 최소값을 보장하거나 직접 계산한 힘을 넣습니다.
+            float FinalImpulse = FMath::Max(ImpactForce * ImpulseMultiplier, 500.0f);
+            OtherComp->AddImpulseAtLocation(ImpulseDir * FinalImpulse, Hit.ImpactPoint);
+        }
+    }
     ////
 	HitActors.Add(OtherActor);
-
-    GEngine->AddOnScreenDebugMessage(
-        -1,
-        2.f,
-        FColor::Green,
-        FString::Printf(TEXT("데미지 적용 -> 대상: %s, 피해량: %.1f"), *OtherActor->GetName(), CalculatedDamage)
-    );
 }
 
 float UBRAttackComponent::GetCalculatedAttackSpeed() const
@@ -216,5 +262,5 @@ float UBRAttackComponent::GetCalculatedAttackSpeed() const
     }
 
     // 게임플레이 한계치 설정 (너무 느리거나 빠르면 비현실적)
-    return FMath::Clamp(FinalSpeed, 0.33f, 3.0f);
+    return FMath::Clamp(FinalSpeed, 0.5f, 1.5f);
 }

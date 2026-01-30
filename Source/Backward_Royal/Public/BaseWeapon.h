@@ -26,6 +26,7 @@ public:
     static float GlobalDamageMultiplier;
     static float GlobalImpulseMultiplier;
     static float GlobalAttackSpeedMultiplier;
+    static float GlobalDurabilityReduction;
 
     // --- 무기 데이터 및 메시 ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
@@ -56,10 +57,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Weapon|Durability")
     void DecreaseDurability(float DamageAmount);
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
+    float DurabilityReduction = 50.f;
+
+    bool IsEquipped() { return bIsEquipped; }
+
 protected:
     virtual void BeginPlay() override;
     virtual void OnConstruction(const FTransform& Transform) override;
 
 private:
     bool bIsEquipped;
+
 };

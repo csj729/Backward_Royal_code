@@ -109,6 +109,23 @@ void UBRWidgetFunctionLibrary::CreateRoom(const UObject* WorldContextObject, con
 	}
 }
 
+void UBRWidgetFunctionLibrary::CreateRoomWithPlayerName(const UObject* WorldContextObject, const FString& RoomName, const FString& PlayerName)
+{
+	ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject);
+	if (!BRPC)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[WidgetFunctionLibrary] CreateRoomWithPlayerName: PlayerController를 찾을 수 없습니다."));
+		return;
+	}
+	// GameInstance에 이름 저장 (ServerTravel 후 PostLogin에서 적용)
+	if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(BRPC->GetGameInstance()))
+	{
+		BRGI->SetPlayerName(PlayerName);
+		UE_LOG(LogTemp, Log, TEXT("[WidgetFunctionLibrary] 방 생성 + 플레이어 이름: %s, 방이름: %s"), *PlayerName, *RoomName);
+	}
+	BRPC->CreateRoomWithPlayerName(RoomName, PlayerName);
+}
+
 void UBRWidgetFunctionLibrary::FindRooms(const UObject* WorldContextObject)
 {
 	if (ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject))
@@ -143,6 +160,21 @@ void UBRWidgetFunctionLibrary::JoinRoom(const UObject* WorldContextObject, int32
 		return;
 	}
 
+	// Join Menu에서 선택한 방 이름을 미리 캐시 → 로비 진입 시 연결 대기 없이 "○○'s Game" 즉시 표시
+	ABRGameSession* Session = GetBRGameSession(WorldContextObject);
+	if (Session && BRPC->GetGameInstance())
+	{
+		FString RoomName = Session->GetSessionName(SessionIndex);
+		if (!RoomName.IsEmpty())
+		{
+			if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(BRPC->GetGameInstance()))
+			{
+				BRGI->SetCachedRoomTitle(RoomName);
+				UE_LOG(LogTemp, Log, TEXT("[WidgetFunctionLibrary] Join Menu 방 이름 캐시: %s"), *RoomName);
+			}
+		}
+	}
+
 	// Game Instance에서 Player Name 조회 (블루프린트 Cast/Get Game Instance 불필요)
 	FString PlayerName;
 	if (UGameInstance* GI = BRPC->GetGameInstance())
@@ -159,6 +191,19 @@ void UBRWidgetFunctionLibrary::JoinRoom(const UObject* WorldContextObject, int32
 	}
 
 	BRPC->JoinRoomWithPlayerName(SessionIndex, PlayerName);
+}
+
+void UBRWidgetFunctionLibrary::LeaveRoom(const UObject* WorldContextObject)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[WidgetFunctionLibrary] 방 나가기 요청"));
+		BRPC->LeaveRoom();
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[WidgetFunctionLibrary] PlayerController를 찾을 수 없습니다."));
+	}
 }
 
 void UBRWidgetFunctionLibrary::SetUseLANOnly(const UObject* WorldContextObject, bool bLAN)
@@ -226,6 +271,22 @@ void UBRWidgetFunctionLibrary::ChangeTeam(const UObject* WorldContextObject, int
 	}
 }
 
+void UBRWidgetFunctionLibrary::RequestAssignToLobbyTeam(const UObject* WorldContextObject, int32 TeamIndex, int32 SlotIndex)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject))
+	{
+		BRPC->RequestAssignToLobbyTeam(TeamIndex, SlotIndex);
+	}
+}
+
+void UBRWidgetFunctionLibrary::RequestMoveToLobbyEntry(const UObject* WorldContextObject, int32 TeamIndex, int32 SlotIndex)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject))
+	{
+		BRPC->RequestMoveToLobbyEntry(TeamIndex, SlotIndex);
+	}
+}
+
 void UBRWidgetFunctionLibrary::StartGame(const UObject* WorldContextObject)
 {
 	if (ABRPlayerController* BRPC = GetBRPlayerController(WorldContextObject))
@@ -260,6 +321,32 @@ ABRGameSession* UBRWidgetFunctionLibrary::GetBRGameSession(const UObject* WorldC
 	return nullptr;
 }
 
+UBRGameInstance* UBRWidgetFunctionLibrary::GetBRGameInstance(const UObject* WorldContextObject)
+{
+	if (!WorldContextObject || !GEngine)
+	{
+		return nullptr;
+	}
+
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	UGameInstance* GI = World->GetGameInstance();
+	return Cast<UBRGameInstance>(GI);
+}
+
+void UBRWidgetFunctionLibrary::SetPlayerName(const UObject* WorldContextObject, const FString& PlayerName)
+{
+	if (UBRGameInstance* BRGI = GetBRGameInstance(WorldContextObject))
+	{
+		BRGI->SetPlayerName(PlayerName);
+		UE_LOG(LogTemp, Log, TEXT("[WidgetFunctionLibrary] Set Player Name: %s"), *PlayerName);
+	}
+}
+
 ABRGameState* UBRWidgetFunctionLibrary::GetBRGameState(const UObject* WorldContextObject)
 {
 	if (!WorldContextObject)
@@ -274,6 +361,47 @@ ABRGameState* UBRWidgetFunctionLibrary::GetBRGameState(const UObject* WorldConte
 	}
 
 	return World->GetGameState<ABRGameState>();
+}
+
+FString UBRWidgetFunctionLibrary::GetRoomTitleForDisplay(const UObject* WorldContextObject)
+{
+	if (!WorldContextObject || !GEngine)
+	{
+		return TEXT("Host's Game");
+	}
+
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	if (!World)
+	{
+		return TEXT("Host's Game");
+	}
+
+	UGameInstance* GI = World->GetGameInstance();
+	if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(GI))
+	{
+		FString Cached = BRGI->GetCachedRoomTitle();
+		if (!Cached.IsEmpty())
+		{
+			return Cached;
+		}
+	}
+
+	if (ABRGameState* GS = World->GetGameState<ABRGameState>())
+	{
+		return GS->GetRoomTitleDisplay();
+	}
+
+	return TEXT("Host's Game");
+}
+
+FString UBRWidgetFunctionLibrary::GetDisplayNameForLobby(const FBRUserInfo& UserInfo)
+{
+	// 빈 슬롯(PlayerIndex < 0) 또는 이름 미설정 → 공란. 플레이어가 있으면 PlayerName만 표시 ("Player N" 폴백 제거)
+	if (UserInfo.PlayerIndex < 0 || UserInfo.PlayerName.IsEmpty() || UserInfo.PlayerName == UserInfo.UserUID)
+	{
+		return FString();
+	}
+	return UserInfo.PlayerName;
 }
 
 ABRPlayerState* UBRWidgetFunctionLibrary::GetBRPlayerState(const UObject* WorldContextObject)

@@ -370,7 +370,7 @@ void ABaseCharacter::MulticastPlayPunch_Implementation(UAnimMontage* TargetMonta
 }
 
 // 공격 시작 시 호출 (AnimNotify 등에서 활용)
-void ABaseCharacter::EnhanceFistPhysics(bool bEnable)
+void ABaseCharacter::EnhancePhysics(bool bEnable)
 {
     // 팔 관련 본들의 이름을 배열로 관리하여 적용
     TArray<FName> RootArmBones = { TEXT("lowerarm_r"), TEXT("lowerarm_l") };
