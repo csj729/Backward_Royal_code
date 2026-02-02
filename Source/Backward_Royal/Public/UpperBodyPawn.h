@@ -3,7 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "InputActionValue.h"
-#include "Misc/Optional.h" // [수정] UE 5.5 필수 헤더 (이게 없으면 오류 2천개 뜸)
+#include "Misc/Optional.h"
 #include "UpperBodyPawn.generated.h"
 
 // 전방 선언

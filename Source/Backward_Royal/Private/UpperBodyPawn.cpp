@@ -11,7 +11,9 @@
 #include "EnhancedInputSubsystems.h"
 #include "BRAttackComponent.h"
 #include "BRPlayerController.h"
+#include "Engine/OverlapResult.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Kismet/KismetMathLibrary.h"
 #include "DrawDebugHelpers.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogUpperBodyPawn, Log, All);
@@ -267,79 +269,80 @@ void AUpperBodyPawn::OnAttackMontageEnded(UAnimMontage* Montage, bool bInterrupt
 
 void AUpperBodyPawn::Interact(const FInputActionValue& Value)
 {
-	// 1. 부모(몸통) 캐릭터 확인
 	if (!ParentBodyCharacter)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
 		if (!ParentBodyCharacter) return;
 	}
 
-	// 2. 트레이스 시작점 및 끝점 설정
-	FVector Start;
-	if (ParentBodyCharacter->GetMesh() && ParentBodyCharacter->GetMesh()->DoesSocketExist(TEXT("head")))
-	{
-		Start = ParentBodyCharacter->HeadMountPoint->GetComponentLocation();
-	}
-	else
-	{
-		Start = FrontCamera->GetComponentLocation();
-	}
+	// 1. 탐색 시작점 설정 (카메라 위치 혹은 캐릭터 위치)
+	FVector SearchOrigin = FrontCamera->GetComponentLocation();
 
-	FVector End = Start + (FrontCamera->GetForwardVector() * InteractionDistance);
-
-	// 3. 트레이스 설정 및 현재 장착 무기 제외
-	FHitResult HitResult;
+	// 2. 주변의 모든 액터 검출 (Overlap)
+	TArray<FOverlapResult> OverlapResults;
+	FCollisionShape SearchSphere = FCollisionShape::MakeSphere(InteractionDistance);
 	FCollisionQueryParams QueryParams;
 	QueryParams.AddIgnoredActor(this);
 	QueryParams.AddIgnoredActor(ParentBodyCharacter);
 
-	// [핵심 추가] 현재 손에 들고 있는 무기가 있다면 트레이스 대상에서 제외
 	if (ParentBodyCharacter->CurrentWeapon)
 	{
 		QueryParams.AddIgnoredActor(ParentBodyCharacter->CurrentWeapon);
 	}
 
-	// 구체 반지름 설정
-	float TraceRadius = 25.0f;
-
-	// Sphere Trace 실행
-	bool bHit = GetWorld()->SweepSingleByChannel(
-		HitResult,
-		Start,
-		End,
+	// ECC_Visibility 채널을 사용하여 주변 액터 탐색
+	bool bHasOverlap = GetWorld()->OverlapMultiByChannel(
+		OverlapResults,
+		SearchOrigin,
 		FQuat::Identity,
 		ECC_Visibility,
-		FCollisionShape::MakeSphere(TraceRadius),
+		SearchSphere,
 		QueryParams
 	);
 
-	// 4. 시각화 및 상호작용 로직
-	if (bHit)
+	if (bHasOverlap)
 	{
-		AActor* HitActor = HitResult.GetActor();
+		AActor* ClosestActor = nullptr;
+		float MinDistance = InteractionDistance + 100.0f; // 초기값 설정
 
-		// 인터페이스 구현 여부 확인
-		if (HitActor && HitActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
+		for (const FOverlapResult& Result : OverlapResults)
 		{
-			// 이미 들고 있는 무기를 다시 줍는 것을 방지하기 위한 안전장치 (선택 사항)
-			if (HitActor != ParentBodyCharacter->CurrentWeapon)
-			{
-				ServerRequestInteract(HitActor);
+			AActor* PotentialActor = Result.GetActor();
+			if (!PotentialActor) continue;
 
-				if (GEngine)
+			// 상호작용 인터페이스 구현 여부 확인
+			if (PotentialActor->GetClass()->ImplementsInterface(UInteractableInterface::StaticClass()))
+			{
+				float DistanceToActor = FVector::Dist(SearchOrigin, PotentialActor->GetActorLocation());
+
+				// 가장 가까운 액터 갱신
+				if (DistanceToActor < MinDistance)
 				{
-					GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
-						FString::Printf(TEXT("Requesting Server Interact: %s"), *HitActor->GetName()));
+					MinDistance = DistanceToActor;
+					ClosestActor = PotentialActor;
 				}
 			}
 		}
 
-		DrawDebugLine(GetWorld(), Start, HitResult.ImpactPoint, FColor::Green, false, 2.0f, 0, 1.5f);
-		DrawDebugSphere(GetWorld(), HitResult.ImpactPoint, TraceRadius, 12, FColor::Green, false, 2.0f);
+		// 3. 가장 가까운 액터를 찾았다면 서버에 상호작용 요청
+		if (ClosestActor)
+		{
+			ServerRequestInteract(ClosestActor);
+
+			if (GEngine)
+			{
+				GEngine->AddOnScreenDebugMessage(-1, 2.0f, FColor::Cyan,
+					FString::Printf(TEXT("Closest Interactable Found: %s"), *ClosestActor->GetName()));
+			}
+
+			// 시각적 피드백 (디버그용)
+			DrawDebugSphere(GetWorld(), ClosestActor->GetActorLocation(), 30.0f, 12, FColor::Green, false, 2.0f);
+		}
 	}
 	else
 	{
-		DrawDebugLine(GetWorld(), Start, End, FColor::Red, false, 2.0f, 0, 1.0f);
+		// 아무것도 찾지 못했을 때 디버그 표시
+		DrawDebugSphere(GetWorld(), SearchOrigin, InteractionDistance, 12, FColor::Red, false, 1.0f);
 	}
 }
 
