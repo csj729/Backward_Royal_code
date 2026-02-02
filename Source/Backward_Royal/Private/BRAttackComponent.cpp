@@ -88,6 +88,8 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
         {
             if (bEnabled)
             {
+                BodyMesh->SetCollisionObjectType(ECC_WorldDynamic);
+                BodyMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
                 BodyMesh->SetNotifyRigidBodyCollision(true);
                 if (!BodyMesh->OnComponentHit.IsAlreadyBound(this, &UBRAttackComponent::InternalHandleOwnerHit))
                 {
@@ -96,10 +98,13 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
             }
             else
             {
+                BodyMesh->SetCollisionObjectType(ECC_Pawn);
+                BodyMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
                 BodyMesh->SetNotifyRigidBodyCollision(false);
                 BodyMesh->OnComponentHit.RemoveDynamic(this, &UBRAttackComponent::InternalHandleOwnerHit);
                 HitActors.Empty();
             }
+
         }
     }
 }

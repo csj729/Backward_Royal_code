@@ -39,24 +39,25 @@ ABaseCharacter::ABaseCharacter()
 
     AttackComponent = CreateDefaultSubobject<UBRAttackComponent>(TEXT("AttackComponent"));
 
-    // PhysicsControlComp = CreateDefaultSubobject<UPhysicsControlComponent>(TEXT("PhysicsControlComp"));
+    if (GetCapsuleComponent())
+    {
+        // Pawn 채널(다른 캐릭터)에 대해 Block 설정
+        GetCapsuleComponent()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+    }
 
+    // 2. 메시 컴포넌트: 이동 충돌에서 제외 (Overlap) -> 지터링 원인 제거
     if (GetMesh())
     {
-        // 1. 물리(Physics)와 쿼리(Query) 모두 활성화
         GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-        // 2. 기본 프로필 설정 (CharacterMesh 권장)
-        GetMesh()->SetCollisionProfileName(TEXT("CharacterMesh"));
+        // 메시끼리는 절대 서로 밀어내지 않도록 Overlap으로 설정
+        // 이렇게 해야 캡슐끼리만 부딪히고, 메시는 부드럽게 겹쳐서 지터링이 사라짐
+        GetMesh()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 
-        // 3. Pawn(다른 플레이어)에 대해 Block 설정 -> 서로 밀리게 됨
-        GetMesh()->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
-
-        // 4. 카메라는 무시 (카메라가 몸 뚫을 때 덜컹거림 방지)
         GetMesh()->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
 
-        // 5. 평소에는 Hit Event를 꺼둬서 불필요한 연산 방지 (공격 때만 BRAttackComponent가 켬)
-        GetMesh()->SetNotifyRigidBodyCollision(false);
+        // 식별 태그 (공격 판정용으로 유지)
+        GetMesh()->ComponentTags.Add(TEXT("CharacterMesh"));
     }
 
     DefaultWalkSpeed = 600.0f;
@@ -76,11 +77,6 @@ void ABaseCharacter::BeginPlay()
     HandMesh->SetLeaderPoseComponent(GetMesh());
     LegMesh->SetLeaderPoseComponent(GetMesh());
     FootMesh->SetLeaderPoseComponent(GetMesh());
-
-    //if (PhysicsControlComp && GetMesh())
-    //{
-    //    SetupArmPhysicsControls();
-    //}
 
     if (GetCharacterMovement())
     {
@@ -325,34 +321,35 @@ void ABaseCharacter::MulticastDie_Implementation(FVector Impulse, FVector HitLoc
         GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
         GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-        // 특정 뼈 이름("pelvis") 대신 루트 본을 찾아 전체 물리 활성화
         FName RootBoneName = GetMesh()->GetBoneName(0);
         GetMesh()->SetAllBodiesBelowSimulatePhysics(RootBoneName, true, true);
+
         GetMesh()->SetSimulatePhysics(true);
         GetMesh()->WakeAllRigidBodies();
 
-        // 4. 충격량 적용
-        if (!Impulse.IsNearlyZero())
+        // [★수정] 에러 로그 방지 코드
+        // 물리가 켜져 있을 때만 힘을 가합니다. 
+        // (만약 이번 프레임에 안 켜졌다면 건너뛰지만, 랙돌의 자연스러운 관성은 유지됩니다)
+        if (GetMesh()->IsSimulatingPhysics() && !Impulse.IsNearlyZero())
         {
-            // 화면에 디버그 메시지 출력 (클라이언트에서도 보이도록)
+            // 디버그 메시지
             if (GEngine)
             {
                 FString DebugMsg = FString::Printf(TEXT("Ragdoll Force: %.0f"), Impulse.Size());
                 GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, DebugMsg);
             }
 
-            // 디버그 라인 그리기 (모든 빌드에서 보이도록)
             if (!HitLocation.IsNearlyZero())
             {
-                DrawDebugLine(GetWorld(), HitLocation, HitLocation + (Impulse.GetSafeNormal() * 150.0f), FColor::Red, false, 5.0f, 0, 3.0f);
-                DrawDebugSphere(GetWorld(), HitLocation, 15.0f, 12, FColor::Red, false, 5.0f);
+                // ... (디버그 라인 그리기 생략) ...
 
-                // 가장 가까운 뼈를 찾아 타격
                 FName ClosestBone = GetMesh()->FindClosestBone(HitLocation);
+
+                // [안전장치 추가] 찾은 뼈가 유효하고, 해당 뼈에 물리 바디가 있는지 확인하면 더 완벽합니다.
+                // 하지만 IsSimulatingPhysics() 체크만으로도 대부분 해결됩니다.
                 if (ClosestBone != NAME_None)
                 {
                     GetMesh()->AddImpulseAtLocation(Impulse, HitLocation, ClosestBone);
-                    CHAR_LOG(Log, TEXT("Applied Impulse to Bone: %s"), *ClosestBone.ToString());
                 }
                 else
                 {
@@ -361,7 +358,6 @@ void ABaseCharacter::MulticastDie_Implementation(FVector Impulse, FVector HitLoc
             }
             else
             {
-                // 위치 정보 없으면 전체(Root)에 적용
                 GetMesh()->AddImpulse(Impulse);
             }
         }
