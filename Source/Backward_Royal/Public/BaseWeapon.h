@@ -33,9 +33,6 @@ public:
     UStaticMeshComponent* WeaponMesh;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
-    UDataTable* MyDataTable;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FName WeaponRowName;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Weapon")

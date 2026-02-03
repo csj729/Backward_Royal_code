@@ -30,6 +30,10 @@ struct BACKWARD_ROYAL_API FBRUserInfo
 	UPROPERTY(BlueprintReadWrite, Category = "User Info")
 	int32 PlayerIndex;
 
+	// 커스터마이징 정보 구조체
+	UPROPERTY(BlueprintReadWrite, Category = "User Info")
+	FBRCustomizationData CustomizationData;
+
 	// 방장 여부
 	UPROPERTY(BlueprintReadWrite, Category = "User Info")
 	bool bIsHost;
@@ -55,6 +59,7 @@ struct BACKWARD_ROYAL_API FBRUserInfo
 		, bIsReady(false)
 		, bIsLowerBody(true)
 		, ConnectedPlayerIndex(-1)
+		, CustomizationData()
 	{
 	}
 };

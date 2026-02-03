@@ -29,6 +29,21 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
 	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
 	DOREPLIFETIME(ABRPlayerState, UserUID);
+	DOREPLIFETIME(ABRPlayerState, CustomizationData);
+	DOREPLIFETIME(ABRPlayerState, CurrentStatus);
+}
+
+void ABRPlayerState::ServerSetCustomizationData_Implementation(const FBRCustomizationData& NewData)
+{
+	CustomizationData = NewData;
+	// 서버에서도 적용이 필요하면 여기서 델리게이트를 호출하거나 로직 수행
+	OnRep_CustomizationData();
+}
+
+void ABRPlayerState::OnRep_CustomizationData()
+{
+	// 데이터가 갱신되었음을 캐릭터에게 알리거나, 캐릭터가 이를 감지하여 외형 갱신
+	// 예: Cast<APlayerCharacter>(GetPawn())->UpdateAppearance();
 }
 
 void ABRPlayerState::BeginPlay()
@@ -290,4 +305,22 @@ void ABRPlayerState::SetPlayerNameString(const FString& NewPlayerName)
 	SetPlayerName(NameToSet);
 	UE_LOG(LogTemp, Log, TEXT("[플레이어 이름 설정] %s"), *NameToSet);
 	NotifyUserInfoChanged();
+}
+
+void ABRPlayerState::SetPlayerStatus(EPlayerStatus NewStatus)
+{
+	if (HasAuthority())
+	{
+		CurrentStatus = NewStatus;
+		OnRep_PlayerStatus(); // 서버에서도 로직 실행을 위해 직접 호출
+	}
+}
+
+void ABRPlayerState::OnRep_PlayerStatus()
+{
+	// 1. 델리게이트 방송 -> UI(생존자 숫자, 팀원 상태창) 갱신
+	OnPlayerStatusChanged.Broadcast(CurrentStatus);
+
+	// 2. 로그
+	UE_LOG(LogTemp, Log, TEXT("Player %s Status Changed to %d"), *GetPlayerName(), (int32)CurrentStatus);
 }

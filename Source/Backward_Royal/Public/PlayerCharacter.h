@@ -50,6 +50,8 @@ protected:
 	UFUNCTION()
 	void HandleStaminaChanged(float CurrentVal, float MaxVal);
 
+	FTimerHandle TimerHandle_RetryBindPartner; // 커마 적용용 타이머 핸들
+
 	// [신규] 이벤트 기반 커마 적용 시도
 	UFUNCTION()
 	void TryApplyCustomization();

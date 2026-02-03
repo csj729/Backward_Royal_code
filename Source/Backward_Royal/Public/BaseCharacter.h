@@ -12,8 +12,26 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
 class ABaseWeapon;
 class UBRAttackComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDeathDelegate);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHPChanged, float, CurrentHP, float, MaxHP);
+
+// 사망 당시의 물리 정보를 저장할 구조체
+USTRUCT(BlueprintType)
+struct FDeathDamageInfo
+{
+    GENERATED_BODY()
+
+    UPROPERTY()
+    FVector Impulse = FVector::ZeroVector;
+
+    UPROPERTY()
+    FVector HitLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    FVector ServerDieLocation = FVector::ZeroVector;
+
+    UPROPERTY()
+    FRotator ServerDieRotation = FRotator::ZeroRotator;
+};
 
 UCLASS()
 class BACKWARD_ROYAL_API ABaseCharacter : public ACharacter
@@ -26,20 +44,8 @@ public:
 protected:
     virtual void BeginPlay() override;
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-    virtual void Die();
-
-    // 사망 시 충격량(Impulse)과 위치(HitLocation)를 함께 전송
-    UFUNCTION(NetMulticast, Reliable)
-    void MulticastDie(FVector Impulse, FVector HitLocation, FVector ServerDieLocation, FRotator ServerDieRotation);
 
 public:
-    // [변경] 단순히 사망 시 사용할 충격량을 저장만 하는 함수 (즉시 적용 X)
-    void SetLastHitInfo(FVector Impulse, FVector HitLocation);
-
-    // [유지] 사망 시 적용할 마지막 충격량 저장 (서버 전용)
-    FVector LastDeathImpulse = FVector::ZeroVector;
-    FVector LastDeathHitLocation = FVector::ZeroVector;
-
     // --- Components ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components|Armor")
     USkeletalMeshComponent* HeadMesh;
@@ -105,11 +111,16 @@ public:
     void EnhancePhysics(bool bEnable);
 
     virtual float TakeDamage(float DamageAmount, struct FDamageEvent const& DamageEvent, class AController* EventInstigator, AActor* DamageCauser) override;
+    
+    // 서버에서 사망 함수 호출 시 충격량 정보도 같이 받음
+    void Die(FVector KillImpulse, FVector HitLocation);
 
-    UPROPERTY(BlueprintAssignable, Category = "Events")
-    FOnDeathDelegate OnDeath;
+    // [신규] 리플리케이션 될 사망 정보
+    UPROPERTY(Replicated, BlueprintReadOnly, Category = "Status")
+    FDeathDamageInfo LastDeathInfo;
 
-    bool bIsDead = false;
+    // [수정] 인자 없이 내부 변수(LastDeathInfo)를 사용하여 처리
+    void PerformDeathVisuals();
 
     // --- Weapon ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", Replicated)

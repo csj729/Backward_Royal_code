@@ -8,8 +8,17 @@
 #include "BRPlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerStatusChanged, EPlayerStatus, NewStatus);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerSwapAnim);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCustomizationDataChanged);
+
+UENUM(BlueprintType)
+enum class EPlayerStatus : uint8
+{
+	Alive       UMETA(DisplayName = "Alive"),		// 생존
+	Dead        UMETA(DisplayName = "Dead"),		// 사망
+	Spectating  UMETA(DisplayName = "Spectating")	// 관전
+};
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerState : public APlayerState
@@ -96,6 +105,19 @@ public:
 	/** [서버 전용] 유저 인포 관련 값이 바뀌었을 때 GameState의 PlayerListForDisplay 갱신 요청 */
 	void NotifyUserInfoChanged();
 
+	UPROPERTY(ReplicatedUsing = OnRep_PlayerStatus, BlueprintReadOnly, Category = "Status")
+	EPlayerStatus CurrentStatus = EPlayerStatus::Alive;
+
+	UFUNCTION()
+	void OnRep_PlayerStatus();
+
+	// 서버에서 상태 변경 시 호출
+	void SetPlayerStatus(EPlayerStatus NewStatus);
+
+	// 상태 변경 시 UI 등에 알릴 델리게이트
+	UPROPERTY(BlueprintAssignable)
+	FOnPlayerStatusChanged OnPlayerStatusChanged;
+
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerRoleChanged OnPlayerRoleChanged;
 
@@ -116,8 +138,8 @@ public:
 	FOnCustomizationDataChanged OnCustomizationDataChanged;
 
 	// 서버에 내 커마 정보를 알리는 함수
-	UFUNCTION(Server, Reliable, BlueprintCallable)
-	void ServerSetCustomization(const FBRCustomizationData& NewData);
+	UFUNCTION(Server, Reliable)
+	void ServerSetCustomizationData(const FBRCustomizationData& NewData);
 
 	UFUNCTION()
 	void OnRep_CustomizationData();

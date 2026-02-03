@@ -63,29 +63,52 @@ void ABaseWeapon::LoadWeaponData()
 {
     DurabilityReduction = GlobalDurabilityReduction;
 
-    // 1. 테이블과 행 이름이 유효한지 확인
-    if (MyDataTable && !WeaponRowName.IsNone())
+    // 1. GameInstance 가져오기
+    UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+    if (!GI)
     {
-        static const FString ContextString(TEXT("Weapon Data Context"));
+        // 에디터의 컨스트럭션 스크립트 등 런타임 게임 인스턴스가 없는 경우 처리
+        return;
+    }
 
-        // 2. 테이블에서 직접 행을 찾음. 
-        // 이 시점에 MyDataTable은 이미 GameInstance에 의해 JSON 수치로 업데이트된 상태입니다.
-        FWeaponData* FoundData = MyDataTable->FindRow<FWeaponData>(WeaponRowName, ContextString);
+    // 2. GameInstance에서 무기 데이터 테이블 찾기
+    // ※ 주의: BRGameInstance의 ConfigDataMap에 등록한 Key 이름과 일치해야 합니다.
+    // 보통 "WeaponBalance" 또는 "WeaponData" 등으로 저장하셨을 겁니다.
+    UDataTable* WeaponTable = nullptr;
+    FString TableKey = TEXT("WeaponData"); // 실제 키 값으로 변경하세요!
 
-        if (FoundData)
-        {
-            CurrentWeaponData = *FoundData;
+    if (GI->ConfigDataMap.Contains(TableKey))
+    {
+        WeaponTable = GI->ConfigDataMap[TableKey];
+    }
 
-            // 3. 실제 컴포넌트(메시, 질량 등)에 수치 적용
-            InitializeWeaponStats(CurrentWeaponData);
+    if (!WeaponTable)
+    {
+        // 테이블을 못 찾았으면 경고 (아직 로드 안 됐거나 키가 틀림)
+        LOG_WEAPON(Warning, "WeaponDataTable Not Found in GameInstance with Key: %s", *TableKey);
+        return;
+    }
 
-            LOG_WEAPON(Display, "Successfully applied JSON-Balanced data for Row: %s", *WeaponRowName.ToString());
-        }
-        else
-        {
-            LOG_WEAPON(Warning, "Failed to find Row [%s] in DataTable [%s]",
-                *WeaponRowName.ToString(), *MyDataTable->GetName());
-        }
+    // 3. RowName 유효성 체크
+    if (WeaponRowName.IsNone()) return;
+
+    static const FString ContextString(TEXT("Weapon Data Context"));
+
+    // 4. 테이블에서 데이터 조회
+    FWeaponData* FoundData = WeaponTable->FindRow<FWeaponData>(WeaponRowName, ContextString);
+
+    if (FoundData)
+    {
+        CurrentWeaponData = *FoundData;
+
+        // 5. 스탯 적용
+        InitializeWeaponStats(CurrentWeaponData);
+
+        LOG_WEAPON(Display, "Loaded Weapon Data for [%s] from GameInstance", *WeaponRowName.ToString());
+    }
+    else
+    {
+        LOG_WEAPON(Warning, "Failed to find Row [%s] in the GameInstance's Weapon Table", *WeaponRowName.ToString());
     }
 }
 
