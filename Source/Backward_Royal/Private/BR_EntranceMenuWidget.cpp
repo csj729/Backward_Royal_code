@@ -46,6 +46,19 @@ void UBR_EntranceMenuWidget::CreateRoom(const FString& RoomName)
 	}
 }
 
+void UBR_EntranceMenuWidget::CreateRoomWithPlayerName(const FString& RoomName, const FString& PlayerName)
+{
+	if (ABRPlayerController* BRPC = GetBRPlayerController())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[EntranceMenu] 방 생성 요청 (플레이어 이름 포함): %s / %s"), *RoomName, *PlayerName);
+		BRPC->CreateRoomWithPlayerName(RoomName, PlayerName);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Error, TEXT("[EntranceMenu] PlayerController를 찾을 수 없습니다."));
+	}
+}
+
 void UBR_EntranceMenuWidget::FindRooms()
 {
 	if (ABRPlayerController* BRPC = GetBRPlayerController())

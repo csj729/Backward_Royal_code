@@ -1066,11 +1066,11 @@ void UBRGameInstance::LoadPlayerNameFromUserInfo()
 		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] S_UserInfo 에셋을 로드할 수 없습니다. 경로: %s"), *AssetPath);
 	}
 	
-	// 기본 플레이어 이름 설정 (에셋 로드 실패 시)
+	// 에셋 로드 실패 시 "Player" 사용 (빈 값이면 UID가 표시되는 문제 방지. "Player_1234" 대신 깔끔한 기본값)
 	if (PlayerName.IsEmpty())
 	{
-		PlayerName = FString::Printf(TEXT("Player_%d"), FMath::RandRange(1000, 9999));
-		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] 기본 PlayerName 설정: %s"), *PlayerName);
+		PlayerName = TEXT("Player");
+		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] S_UserInfo에서 이름 로드 실패. 기본값 'Player' 사용"));
 	}
 }
 

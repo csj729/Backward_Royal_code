@@ -46,6 +46,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject", DisplayName = "Create Room With Player Name"))
 	static void CreateRoomWithPlayerName(const UObject* WorldContextObject, const FString& RoomName, const FString& PlayerName);
 
+	/** EditableText에서 직접 읽어 방 생성. 버튼 클릭 시 GetText가 빈 값 반환하는 타이밍 이슈 해결 (한 프레임 지연 후 읽음) */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject", DisplayName = "Create Room With Player Name From Editable Text"))
+	static void CreateRoomWithPlayerNameFromEditableText(const UObject* WorldContextObject, class UEditableText* PlayerNameEditableText);
+
 	// 방 찾기
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Session", meta = (WorldContext = "WorldContextObject"))
 	static void FindRooms(const UObject* WorldContextObject);
@@ -81,9 +85,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby", meta = (WorldContext = "WorldContextObject"))
 	static void RequestAssignToLobbyTeam(const UObject* WorldContextObject, int32 TeamIndex, int32 SlotIndex);
 
+	/** 로비: 위젯(self)을 Target에 연결해서 팀/대기열 요청. TeamID 0=대기열 이동, 1~4=팀1~4 슬롯 배치. SlotIndex 0=1P 1=2P */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby", meta = (DisplayName = "Request Assign To Lobby Team (From Widget)"))
+	static void RequestAssignToLobbyTeamFromWidget(UUserWidget* Widget, int32 TeamID, int32 SlotIndex);
+
 	/** 로비: SelectTeam 슬롯의 플레이어를 Entry로 이동 요청 */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby", meta = (WorldContext = "WorldContextObject"))
 	static void RequestMoveToLobbyEntry(const UObject* WorldContextObject, int32 TeamIndex, int32 SlotIndex);
+
+	/** 로비: SelectTeam 위젯(WBP_SelectTeam 등)의 슬롯 표시 갱신. Cast 경고 없이 블루프린트에서 WBP_SelectTeam_0~3 전달용 */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby")
+	static void UpdateSelectTeamSlotDisplay(UUserWidget* SelectTeamWidget);
 
 	// 게임 시작 (방장만)
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Game", meta = (WorldContext = "WorldContextObject"))
@@ -120,6 +132,10 @@ public:
 	/** 로비 플레이어 이름 표시용. PlayerName 사용, UserUID는 절대 반환하지 않음. 빈 문자열/UID와 같으면 "Player N". */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (DisplayName = "Get Display Name For Lobby"))
 	static FString GetDisplayNameForLobby(const FBRUserInfo& UserInfo);
+
+	/** 로비 팀 슬롯 이름 표시용. 플레이어가 있으면 이름, 없으면 SlotIndex 0="1Player" 1="2Player" 반환 */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (DisplayName = "Get Display Name For Lobby Slot"))
+	static FString GetDisplayNameForLobbySlot(const FBRUserInfo& UserInfo, int32 SlotIndex);
 
 	// ============================================
 	// PlayerState 관련 함수들

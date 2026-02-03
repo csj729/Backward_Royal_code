@@ -580,6 +580,11 @@ void ABRPlayerController::CreateRoom(const FString& RoomName)
 		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
 		{
 			BRGI->SetDidCreateRoomThenTravel(true);
+			// CreateRoomWithPlayerName이 이미 CachedRoomTitle 설정한 경우 덮어쓰지 않음. CreateRoom만 호출 시 RoomName으로 캐시
+			if (BRGI->GetCachedRoomTitle().IsEmpty())
+			{
+				BRGI->SetCachedRoomTitle(RoomName.IsEmpty() ? TEXT("Host's Game") : RoomName);
+			}
 			UE_LOG(LogTemp, Error, TEXT("[방 생성] SetDidCreateRoomThenTravel 플래그 설정"));
 		}
 	}
@@ -633,12 +638,23 @@ void ABRPlayerController::CreateRoomWithPlayerName(const FString& RoomName, cons
 	UE_LOG(LogTemp, Error, TEXT("[방 생성] 방 이름: %s, 플레이어 이름: %s"), *RoomName, *PlayerName);
 	UE_LOG(LogTemp, Error, TEXT("========================================"));
 	
-	// GameInstance에 이름 저장 (ServerTravel 후 PostLogin에서 적용 → UserInfo/로비 UI에 정상 반영)
+	// 방 제목: PlayerName 있으면 "○○'s Game", 없으면 RoomName 또는 "Host's Game"
+	FString RoomTitle = PlayerName.IsEmpty() 
+		? (RoomName.IsEmpty() ? TEXT("Host's Game") : RoomName)
+		: (PlayerName + TEXT("'s Game"));
+
+	// GameInstance에 이름·방제목 저장 (ServerTravel 후 PostLogin에서 적용 → UserInfo/로비 UI에 정상 반영)
 	if (UWorld* World = GetWorld())
 	{
 		if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance()))
 		{
 			BRGI->SetPlayerName(PlayerName);
+			BRGI->SetCachedRoomTitle(RoomTitle);
+		}
+		// PIE 스킵 또는 ServerTravel 실패 시에도 즉시 표시되도록 GameState RoomTitle 갱신
+		if (ABRGameState* BRGS = World->GetGameState<ABRGameState>())
+		{
+			BRGS->SetRoomTitle(RoomTitle);
 		}
 	}
 	// 먼저 플레이어 이름 설정
@@ -1068,10 +1084,7 @@ void ABRPlayerController::ServerSetPlayerName_Implementation(const FString& NewP
 		FString OldUID = BRPS->UserUID;
 		BRPS->SetPlayerNameString(NewPlayerName);
 		UE_LOG(LogTemp, Warning, TEXT("[로비이름] ServerSetPlayerName 적용 | 이전 PlayerName='%s' UserUID='%s' → 새 PlayerName='%s'"), *OldName, *OldUID, *BRPS->GetPlayerName());
-		if (ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>())
-		{
-			GS->UpdatePlayerList(); // 복제 목록 갱신 → 모든 클라이언트에 새 이름 반영
-		}
+		// SetPlayerNameString 내부에서 NotifyUserInfoChanged() → UpdatePlayerList() 호출됨
 	}
 }
 
@@ -1125,6 +1138,27 @@ void ABRPlayerController::RequestMoveToLobbyEntry(int32 TeamIndex, int32 SlotInd
 		return;
 	}
 	ServerRequestMoveToLobbyEntry(TeamIndex, SlotIndex);
+}
+
+void ABRPlayerController::RequestMoveMyPlayerToLobbyEntry()
+{
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	APlayerState* PS = GetPlayerState<APlayerState>();
+	if (!GS || !PS) return;
+	const int32 PlayerIndex = GS->PlayerArray.Find(PS);
+	if (PlayerIndex == INDEX_NONE) return;
+	for (int32 TeamIndex = 0; TeamIndex < 4; ++TeamIndex)
+	{
+		for (int32 SlotIndex = 0; SlotIndex < 2; ++SlotIndex)
+		{
+			const int32 Flat = TeamIndex * 2 + SlotIndex;
+			if (GS->LobbyTeamSlots.IsValidIndex(Flat) && GS->LobbyTeamSlots[Flat] == PlayerIndex)
+			{
+				RequestMoveToLobbyEntry(TeamIndex, SlotIndex);
+				return;
+			}
+		}
+	}
 }
 
 void ABRPlayerController::ServerRequestAssignToLobbyTeam_Implementation(int32 TeamIndex, int32 SlotIndex)
@@ -1720,6 +1754,11 @@ void ABRPlayerController::SetMainScreenToLobbyMenu()
 		{
 			MainScreenWidget->ProcessEvent(Function, nullptr);
 			UE_LOG(LogTemp, Log, TEXT("[PlayerController] SetMainScreenToLobbyMenu 호출 완료"));
+			// LobbyMenu 전환 직후 OnPlayerListChanged 브로드캐스트 → 방 제목·플레이어 목록 UI 즉시 갱신
+			if (ABRGameState* BRGS = World->GetGameState<ABRGameState>())
+			{
+				BRGS->UpdatePlayerList();
+			}
 			return;
 		}
 	}

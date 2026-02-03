@@ -583,13 +583,14 @@ void ABRGameMode::StartGame()
 		return;
 	}
 	
-	// Travel 직전에 역할 저장 (PC 쪽 저장이 실패해도 여기서 한 번 더 저장, PIE/멀티 프로세스 대응)
+	// Travel 직전에 역할 저장 (로비에서 선택한 1P/2P·팀 포함) + 게임 맵 로드 후 상체/하체 Pawn 적용 예약
 	if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
 	{
 		if (ABRGameState* GS = GetGameState<ABRGameState>())
 		{
 			GI->SavePendingRolesForTravel(GS);
-			UE_LOG(LogTemp, Warning, TEXT("[게임 시작] Travel 직전 역할 저장 완료 (GameMode)"));
+			GI->SetPendingApplyRandomTeamRoles(true);  // 랜덤이 아니어도 로비 역할(1P=하체, 2P=상체) 적용을 위해 플래그 설정
+			UE_LOG(LogTemp, Warning, TEXT("[게임 시작] Travel 직전 역할 저장 완료 (GameMode), 게임 맵에서 상체/하체 적용 예정"));
 		}
 	}
 	

@@ -73,6 +73,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	FBRUserInfo GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex) const;
 
+	/** 로비 SelectTeam 표시용. 각 플레이어의 TeamID·PlayerIndex(1P=0, 2P=1)로 찾아서 해당 슬롯의 UserInfo 반환. 복제된 PlayerState 기준이라 UI 갱신에 유리 */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	FBRUserInfo GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(int32 TeamID, int32 PlayerIndex) const;
+
 	/** [서버 전용] 해당 플레이어를 Entry에서 제거하고 SelectTeam 슬롯에 배치. 성공 시 true */
 	bool AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, int32 SlotIndex);
 	/** [서버 전용] SelectTeam 슬롯의 플레이어를 Entry 첫 빈 자리로 이동. 성공 시 true */
@@ -128,6 +132,9 @@ public:
 	// 방 제목 복제 수신 시 호출
 	UFUNCTION()
 	void OnRep_RoomTitle();
+
+	/** 대기열 슬롯 압축: 빈 칸(-1) 제거 후 뒤 플레이어를 앞으로 당김. AssignPlayerToLobbyTeam / MovePlayerToLobbyEntry 후 호출 */
+	void CompactLobbyEntrySlots();
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

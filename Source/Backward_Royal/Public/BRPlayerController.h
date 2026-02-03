@@ -80,6 +80,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	void RequestMoveToLobbyEntry(int32 TeamIndex, int32 SlotIndex);
 
+	/** 로비: 자신이 현재 있는 팀 슬롯을 찾아 대기열(Entry)로 이동 요청. 팀에 없으면 아무 동작 안 함 */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void RequestMoveMyPlayerToLobbyEntry();
+
 	// 현재 상태 확인: ShowRoomInfo
 	UFUNCTION(Exec, Category = "Room")
 	void ShowRoomInfo();

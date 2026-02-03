@@ -93,6 +93,9 @@ public:
 	UFUNCTION()
 	void OnRep_PlayerRole();
 
+	/** [서버 전용] 유저 인포 관련 값이 바뀌었을 때 GameState의 PlayerListForDisplay 갱신 요청 */
+	void NotifyUserInfoChanged();
+
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerRoleChanged OnPlayerRoleChanged;
 

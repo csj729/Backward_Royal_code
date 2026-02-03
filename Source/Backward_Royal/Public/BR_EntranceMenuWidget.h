@@ -27,6 +27,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	void CreateRoom(const FString& RoomName);
 
+	/** 방 생성 + 플레이어 이름 설정. 로비에서 "○○'s Game" 표시용. 플레이어 이름 입력 필드와 연결 권장 */
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	void CreateRoomWithPlayerName(const FString& RoomName, const FString& PlayerName);
+
 	// 방 찾기 함수
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	void FindRooms();

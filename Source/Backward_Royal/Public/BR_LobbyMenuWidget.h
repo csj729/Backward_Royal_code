@@ -71,9 +71,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetMyPlayerRole(int32 PlayerIndex);
 
+	/**
+	 * 로비: WBP_SelectTeam_0~3 중 하나에서 1P 또는 2P 버튼 클릭 시 호출.
+	 * UserInfo 기준: TeamID 1~4 = 1팀~4팀, PlayerIndex 0=1P, 1=2P.
+	 * 호출한 플레이어를 해당 팀 슬롯에 배치하고, BRGameState/UserInfo에 그대로 반영 → 팀 선택 및 이름 표시.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void AssignMyPlayerToTeamSlot(int32 TeamID, int32 PlayerIndex);
+
 	// 플레이어 목록 변경 이벤트 (블루프린트에서 바인딩 가능)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Events")
 	void OnPlayerListChanged();
+
+	/** 방 제목 갱신 이벤트 - RoomTitle 문자열을 TextBlock에 표시하도록 블루프린트에서 구현 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "Events", meta = (DisplayName = "On Room Title Refreshed"))
+	void OnRoomTitleRefreshed(const FString& RoomTitle);
 
 	// 팀 변경 이벤트 (블루프린트에서 바인딩 가능)
 	UFUNCTION(BlueprintImplementableEvent, Category = "Events")
