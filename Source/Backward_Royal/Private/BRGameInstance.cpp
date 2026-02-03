@@ -1073,3 +1073,10 @@ void UBRGameInstance::LoadPlayerNameFromUserInfo()
 		UE_LOG(LogTemp, Warning, TEXT("[GameInstance] 기본 PlayerName 설정: %s"), *PlayerName);
 	}
 }
+
+void UBRGameInstance::SaveCustomization(const FBRCustomizationData& NewData)
+{
+	LocalCustomizationData = NewData;
+
+	UE_LOG(LogBRGameInstance, Log, TEXT("Local Customization Saved: Head(%d), Leg(%d)"), NewData.HeadID, NewData.LegID);
+}

@@ -7,6 +7,7 @@
 #include "PlayerCharacter.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameStateBase.h"
+#include "BRGameInstance.h"
 #include "Engine/World.h"
 
 ABRPlayerState::ABRPlayerState()
@@ -29,11 +30,22 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
 	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
 	DOREPLIFETIME(ABRPlayerState, UserUID);
+	DOREPLIFETIME(ABRPlayerState, CustomizationData);
 }
 
 void ABRPlayerState::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 로컬 클라이언트라면, GameInstance에 저장된 내 커마 정보를 서버로 전송
+	if (IsLocalController())
+	{
+		UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+		if (GI)
+		{
+			ServerSetCustomization(GI->GetLocalCustomization());
+		}
+	}
 }
 
 void ABRPlayerState::SetTeamNumber(int32 NewTeamNumber)
@@ -270,4 +282,20 @@ void ABRPlayerState::SetPlayerNameString(const FString& NewPlayerName)
 	}
 	SetPlayerName(NameToSet);
 	UE_LOG(LogTemp, Log, TEXT("[플레이어 이름 설정] %s"), *NameToSet);
+}
+
+void ABRPlayerState::ServerSetCustomization_Implementation(const FBRCustomizationData& NewData)
+{
+	CustomizationData = NewData;
+	// 서버에서도 변경 사실을 로컬(리스닝 서버)에 알리기 위해 호출
+	OnRep_CustomizationData();
+}
+
+void ABRPlayerState::OnRep_CustomizationData()
+{
+	// 데이터가 갱신되었으므로 구독자(캐릭터 등)에게 알림
+	if (OnCustomizationDataChanged.IsBound())
+	{
+		OnCustomizationDataChanged.Broadcast();
+	}
 }

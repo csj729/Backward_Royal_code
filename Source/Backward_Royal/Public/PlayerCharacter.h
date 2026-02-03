@@ -50,6 +50,21 @@ protected:
 	UFUNCTION()
 	void HandleStaminaChanged(float CurrentVal, float MaxVal);
 
+	// [신규] 이벤트 기반 커마 적용 시도
+	UFUNCTION()
+	void TryApplyCustomization();
+
+	// [신규] 파트너가 지정되었을 때 파트너의 이벤트를 구독하는 함수
+	UFUNCTION()
+	void BindToPartnerPlayerState(bool bIsLowerBody);
+
+	// 실제 메시 교체 로직 (ID를 받아서 실제 SkeletalMesh 적용)
+	void ApplyMeshFromID(EArmorSlot Slot, int32 MeshID);
+
+	// 상체/하체 PlayerState 찾기 헬퍼
+	class ABRPlayerState* GetUpperBodyPlayerState() const;
+	class ABRPlayerState* GetLowerBodyPlayerState() const;
+
 public:
 	// --- Components ---
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -94,9 +109,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
 	float SprintSpeed = 1000.0f;
 
-	// --- Events ---
-	// [유지] 위젯이 이 델리게이트에 바인딩되어 있으므로 유지합니다.
-	// 실제 값은 StaminaComp에서 받아와서 뿌려줍니다.
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnStaminaChanged OnStaminaChanged;
 
@@ -107,4 +119,14 @@ public:
 protected:
 	UPROPERTY()
 	class AUpperBodyPawn* CurrentUpperBodyPawn;
+
+private:
+	FTimerHandle CustomizationUpdateTimer; // 동기화 딜레이 처리용
+
+	// 상체/하체 적용 완료 여부 플래그 (중복 적용 방지)
+	bool bUpperBodyApplied = false;
+	bool bLowerBodyApplied = false;
+
+	// 파트너 PlayerState에 바인딩했는지 체크
+	bool bBoundToPartner = false;
 };

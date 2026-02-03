@@ -7,6 +7,7 @@
 #include "TimerManager.h"
 #include "WeaponTypes.h"
 #include "ArmorTypes.h"
+#include "CustomizationInfo.h"
 #include "BRGameInstance.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogBRGameInstance, Log, All);
@@ -148,6 +149,16 @@ public:
 
 	// 전역 변수 설정을 위한 함수
 	void ApplyGlobalMultipliers();
+
+	// 로컬 플레이어가 선택한 커스터마이징 정보 (UI에서 이 값을 수정)
+	UPROPERTY(BlueprintReadWrite, Category = "Customization")
+	FBRCustomizationData LocalCustomizationData;
+
+	UFUNCTION(BlueprintCallable, Category = "Customization")
+	void SaveCustomization(const FBRCustomizationData& NewData);
+
+	UFUNCTION(BlueprintCallable, Category = "Customization")
+	FBRCustomizationData GetLocalCustomization() const { return LocalCustomizationData; }
 		
 protected:
 	// 실제 JSON 파싱 로직

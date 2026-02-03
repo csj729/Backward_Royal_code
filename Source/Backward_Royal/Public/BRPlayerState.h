@@ -4,10 +4,12 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 #include "BRUserInfo.h"
+#include "CustomizationInfo.h"
 #include "BRPlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerSwapAnim);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCustomizationDataChanged);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerState : public APlayerState
@@ -101,6 +103,21 @@ public:
 	void ClientShowSwapAnim();
 
 	void SwapControlWithPartner();
+
+	// ReplicatedUsing으로 변경하여 수신 시 함수 호출 유도
+	UPROPERTY(ReplicatedUsing = OnRep_CustomizationData, BlueprintReadOnly, Category = "Customization")
+	FBRCustomizationData CustomizationData;
+
+	// 구독 가능한 이벤트 디스패처
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnCustomizationDataChanged OnCustomizationDataChanged;
+
+	// 서버에 내 커마 정보를 알리는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable)
+	void ServerSetCustomization(const FBRCustomizationData& NewData);
+
+	UFUNCTION()
+	void OnRep_CustomizationData();
 
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
