@@ -16,6 +16,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogBaseWeapon, Display, All);
 float ABaseWeapon::GlobalDamageMultiplier = 1.0f;
 float ABaseWeapon::GlobalImpulseMultiplier = 1.0f;
 float ABaseWeapon::GlobalAttackSpeedMultiplier = 1.0f;
+float ABaseWeapon::GlobalDurabilityReduction = 10.0f;
 
 ABaseWeapon::ABaseWeapon()
 {
@@ -60,6 +61,8 @@ void ABaseWeapon::BeginPlay()
 // [핵심] 데이터 테이블에서 정보를 읽어와 적용하는 로직
 void ABaseWeapon::LoadWeaponData()
 {
+    DurabilityReduction = GlobalDurabilityReduction;
+
     // 1. 테이블과 행 이름이 유효한지 확인
     if (MyDataTable && !WeaponRowName.IsNone())
     {

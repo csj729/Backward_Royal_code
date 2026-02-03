@@ -20,6 +20,9 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Global_Weapon_AttackSpeedMultiplier = 1.0f;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    float Global_Durability_Reduction = 10.f;
+
     // --- 스태미나 관련 설정 ---
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     float Global_Stamina_SprintDrainRate = 20.0f;
