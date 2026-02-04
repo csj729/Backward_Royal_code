@@ -256,48 +256,65 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(ABaseCharacter, LastDeathInfo);
 }
 
+bool ABaseCharacter::IsDead() const
+{
+    // BRPlayerState의 EPlayerStatus를 확인
+    if (ABRPlayerState* PS = GetPlayerState<ABRPlayerState>())
+    {
+        return PS->CurrentStatus == EPlayerStatus::Dead;
+    }
+    return false;
+}
+
+void ABaseCharacter::SetLastHitInfo(FVector Impulse, FVector HitLocation)
+{
+    LastDeathInfo.Impulse = Impulse;
+    LastDeathInfo.HitLocation = HitLocation;
+}
+
 float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-    if (bIsDead) return 0.0f;
+    // 이미 사망 상태면 데미지 무시 (EPlayerStatus 체크)
+    if (IsDead()) return 0.0f;
 
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
     CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
 
     UpdateHPUI();
 
-    if (CurrentHP <= 0.0f) Die();
+    if (CurrentHP <= 0.0f)
+    {
+        // 저장해둔 LastDeathInfo의 값을 인자로 직접 전달하여 호출
+        Die(LastDeathInfo.Impulse, LastDeathInfo.HitLocation);
+    }
 
     return ActualDamage;
 }
 
 void ABaseCharacter::Die(FVector KillImpulse, FVector HitLocation)
 {
-    if (GetLocalRole() == ROLE_Authority)
+    // 중복 사망 방지
+    if (IsDead()) return;
+
+    // 1. PlayerState 상태 변경 (Alive -> Dead)
+    if (ABRPlayerState* PS = GetPlayerState<ABRPlayerState>())
     {
-        // 1. 이미 죽었는지 체크 (PlayerState 확인)
-        ABRPlayerState* PS = GetPlayerState<ABRPlayerState>();
-        if (PS && PS->CurrentStatus == EPlayerStatus::Dead) return;
+        PS->SetPlayerStatus(EPlayerStatus::Dead);
+    }
 
-        // 2. 사망 정보 구조체 채우기 (클라이언트로 복제됨)
-        LastDeathInfo.Impulse = KillImpulse;
-        LastDeathInfo.HitLocation = HitLocation;
-        LastDeathInfo.ServerDieLocation = GetActorLocation();
-        LastDeathInfo.ServerDieRotation = GetActorRotation();
+    // 2. 사망 정보 확정 저장 (서버 위치 등)
+    LastDeathInfo.Impulse = KillImpulse;
+    LastDeathInfo.HitLocation = HitLocation;
+    LastDeathInfo.ServerDieLocation = GetActorLocation();
+    LastDeathInfo.ServerDieRotation = GetActorRotation();
 
-        // 3. PlayerState 상태 변경 -> 클라이언트 OnRep 트리거
-        if (PS)
-        {
-            PS->SetPlayerStatus(EPlayerStatus::Dead);
-        }
+    // 3. 래그돌/이펙트 처리
+    PerformDeathVisuals();
 
-        // 4. 서버(Listen Server)에서도 시각 효과 실행
-        PerformDeathVisuals();
-
-        // 5. 게임 모드 보고
-        if (ABRGameMode* GM = GetWorld()->GetAuthGameMode<ABRGameMode>())
-        {
-            GM->OnPlayerDied(this);
-        }
+    // 4. 게임 모드에 알림
+    if (ABRGameMode* GM = GetWorld()->GetAuthGameMode<ABRGameMode>())
+    {
+        GM->OnPlayerDied(this);
     }
 }
 

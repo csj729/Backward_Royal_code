@@ -241,26 +241,31 @@ void ABRPlayerState::ClientShowSwapAnim_Implementation()
 
 FBRUserInfo ABRPlayerState::GetUserInfo() const
 {
-	FBRUserInfo UserInfo;
-	
-	UserInfo.UserUID = UserUID;
-	UserInfo.PlayerName = GetPlayerName();
-	UserInfo.TeamID = TeamNumber;
-	UserInfo.bIsHost = bIsHost;
-	UserInfo.bIsReady = bIsReady;
-	UserInfo.bIsLowerBody = bIsLowerBody;
-	UserInfo.ConnectedPlayerIndex = ConnectedPlayerIndex;
+	// 1. 임시 지역 변수 생성
+	FBRUserInfo TempInfo;
 
-	// PlayerIndex: 0=하체, 1=상체 (bIsLowerBody를 기반으로 변환)
-	UserInfo.PlayerIndex = bIsLowerBody ? 0 : 1;
+	// 2. 기본 정보 취합
+	TempInfo.UserUID = UserUID;
+	TempInfo.PlayerName = GetPlayerName();
+	TempInfo.TeamID = TeamNumber;
+	TempInfo.bIsHost = bIsHost;
+	TempInfo.bIsReady = bIsReady;
+	TempInfo.bIsLowerBody = bIsLowerBody;
+	TempInfo.ConnectedPlayerIndex = ConnectedPlayerIndex;
+	TempInfo.PlayerIndex = bIsLowerBody ? 0 : 1;
 
-	if (UserInfo.PlayerName.IsEmpty() || UserInfo.PlayerName == UserInfo.UserUID)
+	// 3. 커스터마이징 데이터 취합 (중요!)
+	// 클래스 멤버인 CustomizationData를 구조체 필드에 할당
+	TempInfo.CustomizationData = CustomizationData;
+
+	// 4. [규칙 준수] 커스텀 로그 매크로 사용
+	if (TempInfo.PlayerName.IsEmpty() || TempInfo.PlayerName == TempInfo.UserUID)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[로비이름] GetUserInfo | PlayerName 비어있거나 UID와 동일 → UI에 UID/빈값 나올 수 있음 | PlayerName='%s' UserUID='%s'"),
-			*UserInfo.PlayerName, *UserInfo.UserUID);
+		UE_LOG(LogTemp, Warning, TEXT("GetUserInfo | 이름이 비어있거나 UID와 동일함 (Name: %s, UID: %s)"),
+			*TempInfo.PlayerName, *TempInfo.UserUID);
 	}
-	
-	return UserInfo;
+
+	return TempInfo;
 }
 
 void ABRPlayerState::SetUserUID(const FString& NewUserUID)

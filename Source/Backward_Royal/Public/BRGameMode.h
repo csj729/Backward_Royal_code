@@ -55,6 +55,9 @@ public:
 	// 랜덤 팀 배정 후 상체/하체 Pawn 재배치 (상체 스폰 및 빙의)
 	void ApplyRoleChangesForRandomTeams();
 
+	// 플레이어 사망 시 호출되는 함수
+	void OnPlayerDied(class ABaseCharacter* VictimCharacter);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

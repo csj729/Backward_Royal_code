@@ -115,6 +115,9 @@ public:
     // 서버에서 사망 함수 호출 시 충격량 정보도 같이 받음
     void Die(FVector KillImpulse, FVector HitLocation);
 
+    void SetLastHitInfo(FVector Impulse, FVector HitLocation);
+
+
     // [신규] 리플리케이션 될 사망 정보
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Status")
     FDeathDamageInfo LastDeathInfo;
@@ -141,4 +144,8 @@ public:
 
 protected:
     bool bIsCharacterAttacking = false;
+
+    UFUNCTION(BlueprintCallable, Category = "Status")
+    bool IsDead() const;
+
 };

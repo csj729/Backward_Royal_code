@@ -7,11 +7,6 @@
 #include "CustomizationInfo.h"
 #include "BRPlayerState.generated.h"
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerStatusChanged, EPlayerStatus, NewStatus);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerSwapAnim);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCustomizationDataChanged);
-
 UENUM(BlueprintType)
 enum class EPlayerStatus : uint8
 {
@@ -19,6 +14,11 @@ enum class EPlayerStatus : uint8
 	Dead        UMETA(DisplayName = "Dead"),		// 사망
 	Spectating  UMETA(DisplayName = "Spectating")	// 관전
 };
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerRoleChanged, bool, bIsLowerBody);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnPlayerStatusChanged, EPlayerStatus, NewStatus);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerSwapAnim);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnCustomizationDataChanged);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRPlayerState : public APlayerState
@@ -109,7 +109,7 @@ public:
 	EPlayerStatus CurrentStatus = EPlayerStatus::Alive;
 
 	UFUNCTION()
-	void OnRep_PlayerStatus();
+	void OnRep_PlayerStatus();	
 
 	// 서버에서 상태 변경 시 호출
 	void SetPlayerStatus(EPlayerStatus NewStatus);

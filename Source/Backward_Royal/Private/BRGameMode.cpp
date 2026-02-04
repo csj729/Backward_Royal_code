@@ -674,3 +674,28 @@ void ABRGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 }
 
+void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
+{
+	if (!VictimCharacter) return;
+
+	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 플레이어 사망 확인: %s"), *VictimCharacter->GetName());
+
+	// 캐릭터에서 PlayerController 및 PlayerState 가져오기
+	if (AController* Controller = VictimCharacter->GetController())
+	{
+		if (ABRPlayerState* PS = Controller->GetPlayerState<ABRPlayerState>())
+		{
+			// PlayerState에 사망 상태가 아직 반영 안 되었다면 여기서 확실히 처리
+			if (PS->CurrentStatus != EPlayerStatus::Dead)
+			{
+				PS->SetPlayerStatus(EPlayerStatus::Dead);
+			}
+
+			UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 처리 완료"),
+				*PS->GetPlayerName(), PS->TeamNumber);
+		}
+	}
+
+	// TODO: 여기에 남은 생존 팀 수를 확인하여 '게임 종료(우승)' 판정 로직 추가
+	// 예: CheckGameEndCondition();
+}
