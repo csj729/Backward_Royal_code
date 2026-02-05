@@ -22,7 +22,7 @@ DEFINE_LOG_CATEGORY_STATIC(LogUpperBodyPawn, Log, All);
 AUpperBodyPawn::AUpperBodyPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
-	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
+	PrimaryActorTick.TickGroup = TG_PostPhysics;
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
@@ -53,6 +53,11 @@ AUpperBodyPawn::AUpperBodyPawn()
 void AUpperBodyPawn::BeginPlay()
 {
 	Super::BeginPlay();
+
+	if (FrontCameraBoom)
+	{
+		FrontCameraBoom->AddTickPrerequisiteActor(this);
+	}
 
 	// 입력 매핑 등록
 	if (APlayerController* PC = Cast<APlayerController>(Controller))

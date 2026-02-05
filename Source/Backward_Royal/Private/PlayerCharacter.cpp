@@ -31,6 +31,37 @@ APlayerCharacter::APlayerCharacter()
 
 	GetMesh()->SetOwnerNoSee(true);
 	GetMesh()->bCastHiddenShadow = true;
+	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+
+	TArray<USkeletalMeshComponent*> ArmorParts = { HeadMesh, ChestMesh, HandMesh, LegMesh, FootMesh };
+
+	for (USkeletalMeshComponent* Part : ArmorParts)
+	{
+		if (Part)
+		{
+			Part->SetOwnerNoSee(true); 
+			Part->bCastHiddenShadow = true;
+
+			// A. [틱 순서 고정] 
+			// "몸통(GetMesh)의 애니메이션/위치 계산이 완전히 끝난 뒤에 -> 갑옷(Part)을 처리해라"
+			// 이 설정이 없으면 몸통은 움직였는데 갑옷은 제자리에 있는 프레임이 섞여서 덜덜 떨립니다.
+			Part->AddTickPrerequisiteComponent(GetMesh());
+
+			// B. [부착 관계 확인]
+			// 갑옷은 반드시 'Root'나 'Capsule'이 아니라 'GetMesh()'에 붙어있어야 합니다.
+			// 왜냐하면 'GetMesh()'에는 네트워크 위치 보정(Smoothing)이 적용되는데, 
+			// 캡슐에 붙어있으면 이 보정을 못 받아서 갑옷만 따로 놉니다.
+			if (Part->GetAttachParent() != GetMesh())
+			{
+				Part->AttachToComponent(GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale);
+				UE_LOG(LogTemp, Warning, TEXT("[%s] 파츠가 GetMesh에 붙어있지 않아 강제로 재부착했습니다."), *Part->GetName());
+			}
+
+			// C. [Leader Pose 재확인]
+			// 혹시라도 풀렸을 경우를 대비해 다시 연결
+			Part->SetLeaderPoseComponent(GetMesh());
+		}
+	}
 
 	// 1. 카메라 설정
 	RearCameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("RearCameraBoom"));
@@ -61,6 +92,8 @@ APlayerCharacter::APlayerCharacter()
 
 void APlayerCharacter::BeginPlay()
 {
+	GetMesh()->SetVisibility(false, false);
+
 	if (StaminaComp)
 	{
 		StaminaComp->OnStaminaChanged.AddDynamic(this, &APlayerCharacter::HandleStaminaChanged);
@@ -460,7 +493,6 @@ void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 	}
 
 	// 2. GameInstance의 맵에서 'ArmorData' 테이블 찾기
-	// (주의: ConfigDataMap에 "ArmorData"라는 Key로 테이블이 등록되어 있어야 함)
 	UDataTable* ArmorDT = nullptr;
 	if (GI->ConfigDataMap.Contains(TEXT("ArmorData")))
 	{
@@ -474,26 +506,41 @@ void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 		return;
 	}
 
-	// --- 아래부터는 기존 로직과 동일 ---
-
 	// 3. 타겟 컴포넌트 선정
 	USkeletalMeshComponent* TargetMeshComp = nullptr;
+	USkeletalMesh* MeshToApply = nullptr; // 적용할 메시를 담을 변수
+
 	switch (Slot)
 	{
-	case EArmorSlot::Head:  TargetMeshComp = HeadMesh; break;
-	case EArmorSlot::Chest: TargetMeshComp = ChestMesh; break;
-	case EArmorSlot::Hands: TargetMeshComp = HandMesh; break;
-	case EArmorSlot::Legs:  TargetMeshComp = LegMesh; break;
-	case EArmorSlot::Feet:  TargetMeshComp = FootMesh; break;
-	default: return;
+	case EArmorSlot::Head:
+		TargetMeshComp = HeadMesh;
+		MeshToApply = DefaultHeadMesh; // 기본값 설정
+		break;
+	case EArmorSlot::Chest:
+		TargetMeshComp = ChestMesh;
+		MeshToApply = DefaultChestMesh;
+		break;
+	case EArmorSlot::Hands:
+		TargetMeshComp = HandMesh;
+		MeshToApply = DefaultHandMesh;
+		break;
+	case EArmorSlot::Legs:
+		TargetMeshComp = LegMesh;
+		MeshToApply = DefaultLegMesh;
+		break;
+	case EArmorSlot::Feet:
+		TargetMeshComp = FootMesh;
+		MeshToApply = DefaultFootMesh;
+		break;
 	}
 
 	if (!TargetMeshComp) return;
 
-	// 4. 장비 해제 (ID 0)
+	// 4. ID가 0인 경우 (장비 해제) -> 기본(맨몸) 메시 적용
 	if (MeshID == 0)
 	{
-		TargetMeshComp->SetSkeletalMesh(nullptr);
+		TargetMeshComp->SetSkeletalMesh(MeshToApply);
+		LOG_PLAYER(Display, TEXT("Applied Default Mesh for Slot %d"), (int32)Slot);
 		return;
 	}
 
@@ -515,11 +562,17 @@ void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 			break;
 		}
 	}
+
 	// 6. 적용
 	if (FoundData && FoundData->ArmorMesh)
 	{
 		TargetMeshComp->SetSkeletalMesh(FoundData->ArmorMesh);
 		LOG_PLAYER(Display, TEXT("Applied Mesh ID %d via GameInstance"), MeshID);
+	}
+	else
+	{
+		// ID는 있는데 데이터를 못 찾았다면 안전하게 기본 메시 적용
+		TargetMeshComp->SetSkeletalMesh(MeshToApply);
 	}
 }
 

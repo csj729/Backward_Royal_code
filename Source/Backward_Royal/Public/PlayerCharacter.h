@@ -92,6 +92,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Customization")
 	void UpdatePreviewMesh(const FBRCustomizationData& NewData);
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+	USkeletalMesh* DefaultHeadMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+	USkeletalMesh* DefaultChestMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+	USkeletalMesh* DefaultHandMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+	USkeletalMesh* DefaultLegMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+	USkeletalMesh* DefaultFootMesh;
+
 public:
 	// --- Input Assets ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
