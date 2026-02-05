@@ -498,13 +498,40 @@ void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 	}
 
 	// 5. 데이터 검색
-	FName RowName = FName(*FString::FromInt(MeshID));
-	FArmorData* FoundData = ArmorDT->FindRow<FArmorData>(RowName, TEXT("ApplyMeshFromID"));
+	FArmorData* FoundData = nullptr;
 
+	static const FString ContextString(TEXT("ApplyMeshFromID_Search"));
+	TArray<FArmorData*> AllRows;
+
+	// 테이블의 모든 행을 가져옵니다.
+	ArmorDT->GetAllRows<FArmorData>(ContextString, AllRows);
+
+	// 반복문으로 하나씩 ID를 대조합니다.
+	for (FArmorData* Row : AllRows)
+	{
+		if (Row && Row->ID == MeshID)
+		{
+			FoundData = Row;
+			break;
+		}
+	}
 	// 6. 적용
 	if (FoundData && FoundData->ArmorMesh)
 	{
 		TargetMeshComp->SetSkeletalMesh(FoundData->ArmorMesh);
 		LOG_PLAYER(Display, TEXT("Applied Mesh ID %d via GameInstance"), MeshID);
 	}
+}
+
+void APlayerCharacter::UpdatePreviewMesh(const FBRCustomizationData& NewData)
+{
+	// 각 부위별로 ApplyMeshFromID를 직접 호출 (기존 함수 재활용)
+	ApplyMeshFromID(EArmorSlot::Head, NewData.HeadID);
+	ApplyMeshFromID(EArmorSlot::Chest, NewData.ChestID);
+	ApplyMeshFromID(EArmorSlot::Hands, NewData.HandID);
+	ApplyMeshFromID(EArmorSlot::Legs, NewData.LegID);
+	ApplyMeshFromID(EArmorSlot::Feet, NewData.FootID);
+
+	// 로그 확인용
+	// LOG_PLAYER(Display, TEXT("Preview Updated: HeadID %d"), NewData.HeadID);
 }

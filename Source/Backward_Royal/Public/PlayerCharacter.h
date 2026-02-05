@@ -3,7 +3,8 @@
 #include "CoreMinimal.h"
 #include "BaseCharacter.h"
 #include "InputActionValue.h"
-#include "StaminaComponent.h" // 컴포넌트 헤더 포함
+#include "StaminaComponent.h"
+#include "CustomizationInfo.h"
 #include "PlayerCharacter.generated.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPlayerChar, Log, All);
@@ -86,6 +87,10 @@ public:
 	void SetUpperBodyRotation(FRotator NewRotation);
 	void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
 	virtual FRotator GetBaseAimRotation() const override;
+
+	// UI에서 호출하여 로비 캐릭터의 외형을 즉시 변경하는 함수
+	UFUNCTION(BlueprintCallable, Category = "Customization")
+	void UpdatePreviewMesh(const FBRCustomizationData& NewData);
 
 public:
 	// --- Input Assets ---

@@ -365,6 +365,11 @@ void ABRPlayerController::BeginPlay()
 			}
 		}, 0.45f, false);
 	}
+
+	if (IsLocalController())
+	{
+		SubmitCustomizationToServer();
+	}
 }
 
 // 서버: 내가 누군가에게 빙의했을 때
@@ -1935,5 +1940,22 @@ void ABRPlayerController::ShowMenuWidget(TSubclassOf<UUserWidget> WidgetClass)
 		{
 			UE_LOG(LogTemp, Error, TEXT("[PlayerController] 위젯 생성 실패"));
 		}
+	}
+}
+
+void ABRPlayerController::SubmitCustomizationToServer()
+{
+	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+	ABRPlayerState* PS = GetPlayerState<ABRPlayerState>();
+
+	if (GI && PS)
+	{
+		// 1. 로컬에 저장된 정보 가져오기
+		FBRCustomizationData LocalData = GI->GetLocalCustomization();
+
+		// 2. PlayerState의 Server RPC 호출 (이미 구현되어 있음)
+		PS->ServerSetCustomizationData(LocalData);
+
+		UE_LOG(LogTemp, Log, TEXT("커스터마이징 정보를 서버로 전송했습니다. HeadID: %d"), LocalData.HeadID);
 	}
 }

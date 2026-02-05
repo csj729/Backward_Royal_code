@@ -34,8 +34,11 @@ struct FArmorData : public FTableRowBase
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EArmorSlot EquipSlot;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    UTexture2D* Icon;
+
     FArmorData()
-        : ID(0), DisplayName(NAME_None), ArmorMesh(nullptr), EquipSlot(EArmorSlot::None)
+        : ID(0), DisplayName(NAME_None), ArmorMesh(nullptr), EquipSlot(EArmorSlot::None), Icon(nullptr)
     {
     }
 

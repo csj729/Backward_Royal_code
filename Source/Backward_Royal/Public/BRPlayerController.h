@@ -164,6 +164,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPawnChanged OnPawnChanged;
 
+	// 로컬 GameInstance의 커마 정보를 서버로 전송하는 함수
+	UFUNCTION(BlueprintCallable, Category = "Customization")
+	void SubmitCustomizationToServer();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
