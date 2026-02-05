@@ -44,6 +44,10 @@ void ABRPlayerState::OnRep_CustomizationData()
 {
 	// 데이터가 갱신되었음을 캐릭터에게 알리거나, 캐릭터가 이를 감지하여 외형 갱신
 	// 예: Cast<APlayerCharacter>(GetPawn())->UpdateAppearance();
+	if (OnCustomizationDataChanged.IsBound())
+	{
+		OnCustomizationDataChanged.Broadcast();
+	}
 }
 
 void ABRPlayerState::BeginPlay()

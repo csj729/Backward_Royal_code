@@ -769,7 +769,7 @@ void UBRGameInstance::UpdateDataTableFromJson(UDataTable *TargetTable,
                                               FString FileName) {
   if (!TargetTable)
     return;
-
+    
   FString FullPath = GetConfigDirectory() + FileName + TEXT(".json");
   FString JsonString;
 
@@ -805,14 +805,26 @@ void UBRGameInstance::UpdateDataTableFromJson(UDataTable *TargetTable,
         uint8 *RowPtr = TargetTable->FindRowUnchecked(RowName);
 
         // 3. 행이 없으면 새로 추가
-        if (!RowPtr) {
-          // 빈 데이터 구조체를 생성하여 테이블에 추가
-          TargetTable->AddRow(RowName, FTableRowBase());
-          // 추가된 행의 포인터를 다시 가져옴
-          RowPtr = TargetTable->FindRowUnchecked(RowName);
+        if (!RowPtr)
+        {
+            if (TableStruct)
+            {
+                // 1. 메모리 할당 (구조체 크기만큼)
+                uint8* NewRowData = (uint8*)FMemory::Malloc(TableStruct->GetStructureSize());
 
-          GI_LOG(Log, TEXT("[%s] 새로운 행 생성됨: %s"), *FileName,
-                 *RowName.ToString());
+                // 2. 구조체 초기화 (생성자 호출 -> 여기서 포인터들이 nullptr로 안전하게 초기화됨)
+                TableStruct->InitializeStruct(NewRowData);
+
+                // 3. 테이블에 추가 (초기화된 데이터를 넣음)
+                TargetTable->AddRow(RowName, *(FTableRowBase*)NewRowData);
+
+                // 4. 임시 메모리 해제
+                TableStruct->DestroyStruct(NewRowData);
+                FMemory::Free(NewRowData);
+            }
+
+            // 포인터 다시 갱신 (이제 안전하게 생성된 행을 가리킴)
+            RowPtr = TargetTable->FindRowUnchecked(RowName);
         }
 
         // 4. 데이터 주입 (기본적으로 기존 데이터는 유지하고 JSON에 있는 필드만
