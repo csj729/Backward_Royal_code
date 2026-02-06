@@ -127,6 +127,7 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientShowSwapAnim();
 
+	UFUNCTION(BlueprintCallable, Category = "Interaction")
 	void SwapControlWithPartner();
 
 	// ReplicatedUsing으로 변경하여 수신 시 함수 호출 유도

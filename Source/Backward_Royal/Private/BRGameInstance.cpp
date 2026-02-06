@@ -983,6 +983,7 @@ void UBRGameInstance::DoPIEExitCleanup(UWorld *World) {
     if (ABRGameSession *GameSession =
             Cast<ABRGameSession>(GameMode->GameSession)) {
       GameSession->UnbindSessionDelegatesForPIEExit();
+      OnRoomTitleReceived.Clear();
     }
   }
 
