@@ -40,7 +40,11 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_IsReady, BlueprintReadWrite, Category = "Room")
 	bool bIsReady;
 
-	// 하체 역할 여부 (true = 하체, false = 상체)
+	/** 관전 슬롯 여부 (true = 관전 슬롯, PlayerIndex 0). 대기열(TeamID 0) 또는 사망 시 관전. (APlayerState::bIsSpectator와 구분) */
+	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
+	bool bIsSpectatorSlot;
+
+	// 하체 역할 여부 (true = 하체, false = 상체). 관전이면 무시
 	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
 	bool bIsLowerBody;
 
@@ -94,9 +98,13 @@ public:
 	UFUNCTION()
 	void OnRep_IsReady();
 
-	// 플레이어 역할 설정
+	// 플레이어 역할 설정 (하체/상체. 관전이 아닐 때만 사용)
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetPlayerRole(bool bLowerBody, int32 ConnectedIndex);
+
+	/** 관전으로 설정/해제. true 시 PlayerIndex 0(관전), false 시 하체/상체 역할 유지 */
+	UFUNCTION(BlueprintCallable, Category = "Player Role")
+	void SetSpectator(bool bSpectator);
 
 	// 플레이어 역할 변경 시 호출되는 이벤트
 	UFUNCTION()

@@ -653,10 +653,49 @@ void UBRGameInstance::RestorePendingRolesFromTravel(ABRGameState *GameState) {
         TEXT("[랜덤 팀 적용] Seamless Travel 후 역할 복원: %d명 (이름 매칭%s)"),
         Restored, bUseStatic ? TEXT(", 정적") : TEXT(""));
   }
+  // 저장 데이터는 즉시 비우지 않음. 재시도(하체 Pawn 대기) 시 다시 복원할 수 있도록 유지.
+  // 실제 클리어는 GameMode에서 적용 성공/포기 시 ClearPendingRoleRestoreData() 호출.
+}
+
+void UBRGameInstance::ClearPendingRoleRestoreData() {
   PendingRoleRestoreByName.Empty();
   PendingRoleRestoreByIndex.Empty();
   G_PendingRoleByName.Empty();
   G_PendingRoleByIndex.Empty();
+}
+
+bool UBRGameInstance::HasPendingRoleRestore() const {
+  return PendingRoleRestoreByName.Num() > 0 ||
+         PendingRoleRestoreByIndex.Num() > 0 || G_PendingRoleByName.Num() > 0 ||
+         G_PendingRoleByIndex.Num() > 0;
+}
+
+int32 UBRGameInstance::GetPendingRoleRestoreCount() const {
+  if (PendingRoleRestoreByIndex.Num() > 0)
+    return PendingRoleRestoreByIndex.Num();
+  return G_PendingRoleByIndex.Num();
+}
+
+bool UBRGameInstance::HasPendingUserInfoForIndex(int32 Index) const {
+  if (Index < 0)
+    return false;
+  if (PendingRoleRestoreByIndex.Num() > 0)
+    return Index < PendingRoleRestoreByIndex.Num();
+  return Index < G_PendingRoleByIndex.Num();
+}
+
+void UBRGameInstance::RestoreUserInfoToPlayerStateForPostLogin(
+    ABRPlayerState *BRPS, int32 Index) {
+  if (!BRPS || Index < 0)
+    return;
+  const TArray<TTuple<int32, bool, int32>> &Arr =
+      (PendingRoleRestoreByIndex.Num() > 0) ? PendingRoleRestoreByIndex
+                                           : G_PendingRoleByIndex;
+  if (Index >= Arr.Num())
+    return;
+  const TTuple<int32, bool, int32> &Data = Arr[Index];
+  BRPS->SetTeamNumber(Data.Get<0>());
+  BRPS->SetPlayerRole(Data.Get<1>(), Data.Get<2>());
 }
 
 /** [핵심] JSON 데이터를 읽어 DT를 갱신하고 에셋으로 저장함 */

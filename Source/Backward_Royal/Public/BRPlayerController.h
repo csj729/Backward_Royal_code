@@ -72,7 +72,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetMyPlayerRole(bool bLowerBody);
 
-	/** 로비: Entry → SelectTeam 슬롯 배치 요청 (자신을 TeamIndex 팀의 SlotIndex 슬롯에 배치). TeamIndex 0~3=팀1~4, SlotIndex 0=1Player 1=2Player */
+	/** 로비: Entry → SelectTeam 슬롯 배치 요청. TeamIndex 0~3=팀1~4, SlotIndex 0=관전 1=1Player(하체) 2=2Player(상체) */
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	void RequestAssignToLobbyTeam(int32 TeamIndex, int32 SlotIndex);
 
@@ -92,9 +92,17 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyGameStarting();
 
+	/** PIE 등에서 ServerTravel이 클라이언트를 따라오지 않을 때, 서버가 지정한 URL로 직접 이동 */
+	UFUNCTION(Client, Reliable)
+	void ClientTravelToGameMap(const FString& TravelURL);
+
 	/** 입장 직후 방 제목 전달 (복제 대기 없이 "○○'s Game" 즉시 표시) */
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveRoomTitle(const FString& RoomTitle);
+
+	/** 서버가 입장 직후 클라이언트에 로비 UI 갱신 요청 (늦게 들어온 3·4번째 클라이언트 UI 동기화용) */
+	UFUNCTION(Client, Reliable)
+	void ClientRequestLobbyUIRefresh();
 
 	// 역할에 따른 입력 매핑 교체 함수
 	UFUNCTION(BlueprintCallable, Category = "Input")
@@ -176,7 +184,10 @@ protected:
 
 	// 클라이언트에서 폰 정보가 복제되었을 때 호출됨
 	virtual void OnRep_Pawn() override;
-	
+
+	/** 상체 빙의 시 ViewTarget/입력 적용 (복제 타이밍에 따라 한 클라이언트만 누락되는 현상 방지용으로 다음 틱에도 재적용) */
+	void ApplyUpperBodyViewAndInput();
+
 	// 네트워크 연결 실패 감지
 	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
 
@@ -203,6 +214,7 @@ protected:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestChangePlayerTeam(int32 PlayerIndex, int32 NewTeamNumber);
 
+	/** 게임 시작 요청 (클라이언트→서버). 주의: 블루프린트에서 오버라이드 시 파라미터를 추가/변경하면 ReceivePropertiesForRPC Mismatch로 연결이 끊깁니다. 시그니처 변경 금지. */
 	UFUNCTION(Server, Reliable)
 	void ServerRequestStartGame();
 
@@ -240,5 +252,12 @@ private:
 
 	// BeginPlay UI 초기화 타이머 (EndPlay에서 해제하여 open ?listen 크래시 방지)
 	FTimerHandle BeginPlayUITimerHandle;
+
+	/** 상체 ViewTarget/입력 지연 재적용 타이머 (OnRep_Pawn 후 한 틱 뒤 재적용) */
+	FTimerHandle UpperBodyViewInputDelayHandle;
+
+	/** 호스트가 방 나가기 후 메인 맵에서 ListenServer NetDriver를 한 번만 종료해 Standalone으로 전환 (방 찾기 가능하도록) */
+	FTimerHandle ShutdownListenServerTimerHandle;
+	void TryShutdownListenServerForRoomSearch();
 };
 

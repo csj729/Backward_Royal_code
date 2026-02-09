@@ -10,6 +10,22 @@
 #include "CustomizationInfo.h"
 #include "BRGameInstance.generated.h"
 
+class ABRPlayerState;
+
+/** Seamless Travel 시 PlayerState에 복원할 전체 UserInfo (저장/복원용) */
+struct FTravelUserInfoSave
+{
+	FString UserUID;
+	FString PlayerName;
+	FBRCustomizationData CustomizationData;
+	bool bIsHost = false;
+	bool bIsReady = false;
+	int32 TeamNumber = 0;
+	bool bIsSpectatorSlot = false;
+	bool bIsLowerBody = true;
+	int32 ConnectedPlayerIndex = -1;
+};
+
 DECLARE_LOG_CATEGORY_EXTERN(LogBRGameInstance, Log, All);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnRoomTitleReceived);
 
@@ -81,6 +97,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player")
 	void SetPlayerName(const FString& NewPlayerName) { PlayerName = NewPlayerName; }
 
+	/** 세션 동안 유지되는 UserUID (방 입장/게임 시작 시 초기화 방지) */
+	UPROPERTY(BlueprintReadWrite, Category = "Player")
+	FString UserUID;
+
+	UFUNCTION(BlueprintCallable, Category = "Player")
+	FString GetUserUID() const { return UserUID; }
+
+	UFUNCTION(BlueprintCallable, Category = "Player")
+	void SetUserUID(const FString& NewUserUID) { UserUID = NewUserUID; }
+
 	/** S_UserInfo 에셋에서 PlayerName 로드 */
 	void LoadPlayerNameFromUserInfo();
 
@@ -147,6 +173,19 @@ public:
 	/** 게임 맵 로드 후 ApplyRoleChangesForRandomTeams 내부에서 호출: 저장된 팀/역할을 PlayerState에 복원 */
 	void RestorePendingRolesFromTravel(class ABRGameState* GameState);
 
+	/** 역할 복원용 저장 데이터 비우기 (적용 성공/포기 시 GameMode에서만 호출) */
+	void ClearPendingRoleRestoreData();
+
+	/** Travel 복원 대기 중인지 (게임 맵 PostLogin 직후 UpdatePlayerList에서 새 플레이어→대기열 초기화 스킵용) */
+	bool HasPendingRoleRestore() const;
+	/** 저장된 역할 복원 데이터 개수 (ApplyRoleChangesForRandomTeams 대기 조건용) */
+	int32 GetPendingRoleRestoreCount() const;
+
+	/** PostLogin에서 호출: Travel 복원 시 해당 인덱스의 UserInfo가 있으면 true */
+	bool HasPendingUserInfoForIndex(int32 Index) const;
+	/** PostLogin에서 호출: 저장된 UserInfo를 PlayerState에 즉시 복원 (UID, Name, Customization, Host, Ready) */
+	void RestoreUserInfoToPlayerStateForPostLogin(class ABRPlayerState* BRPS, int32 Index);
+
 	// 전역 변수 설정을 위한 함수
 	void ApplyGlobalMultipliers();
 
@@ -181,9 +220,9 @@ protected:
 	/** 로비에서 랜덤 팀 배정 후, 게임 맵에서 ApplyRoleChangesForRandomTeams 호출 대기 */
 	bool bPendingApplyRandomTeamRoles = false;
 
-	/** Seamless Travel 후 역할 복원용. PlayerName으로 매칭 (Travel 후에도 동일한 이름 유지 가정) */
+	/** Seamless Travel 후 역할 복원용 (TeamNumber, bIsLowerBody, ConnectedPlayerIndex) */
 	TMap<FString, TTuple<int32, bool, int32>> PendingRoleRestoreByName;
-	/** 인덱스 폴백용 (PlayerName 매칭 실패 시 사용) */
+	/** 인덱스 폴백용 */
 	TArray<TTuple<int32, bool, int32>> PendingRoleRestoreByIndex;
 
 	/** PIE 종료 시 월드 GC 방해 방지: OnStart에서 설정한 타이머 핸들 (Shutdown에서 명시적으로 클리어) */
@@ -192,5 +231,10 @@ protected:
 
 	/** OnWorldCleanup 등록 해제용 (Shutdown에서 Remove) */
 	FDelegateHandle OnWorldCleanupHandle;
+
+#if WITH_EDITOR
+	/** PIE 종료 시 엔진 참조 검사보다 먼저 정리하기 위한 PrePIEEnded 핸들 */
+	FDelegateHandle PrePIEEndedHandle;
+#endif
 };
 

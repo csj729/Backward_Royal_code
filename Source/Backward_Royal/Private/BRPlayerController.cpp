@@ -253,13 +253,14 @@ void ABRPlayerController::BeginPlay()
 					}
 					else
 					{
-						// 세션이 없음 - MainMenu 표시 (처음 실행 시)
+						// 세션이 없음 - MainMenu 표시 (호스트가 방 나가기 후 복귀). ListenServer NetDriver 종료 예약 → Standalone 전환 후 방 찾기 가능.
 						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
 						{
 							BRGI->SetDidCreateRoomThenTravel(false);
 						}
 						SetMainScreenToEntranceMenu();
 						UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - ListenServer 모드 (세션 없음)"));
+						W->GetTimerManager().SetTimer(ShutdownListenServerTimerHandle, this, &ABRPlayerController::TryShutdownListenServerForRoomSearch, 0.3f, false);
 					}
 				}
 				else
@@ -293,7 +294,7 @@ void ABRPlayerController::BeginPlay()
 					}
 					else
 					{
-						// 세션이 없음 - MainMenu 표시 (처음 실행 시)
+						// 세션이 없음 - MainMenu 표시 (호스트가 방 나가기 후 복귀). ListenServer NetDriver 종료 예약.
 						if (UBRGameInstance* BRGI = Cast<UBRGameInstance>(W->GetGameInstance()))
 						{
 							BRGI->SetDidCreateRoomThenTravel(false);
@@ -302,6 +303,7 @@ void ABRPlayerController::BeginPlay()
 						{
 							ShowEntranceMenu();
 							UE_LOG(LogTemp, Log, TEXT("[PlayerController] 초기 UI (EntranceMenu) 표시 - ListenServer 모드 (세션 없음)"));
+							W->GetTimerManager().SetTimer(ShutdownListenServerTimerHandle, this, &ABRPlayerController::TryShutdownListenServerForRoomSearch, 0.3f, false);
 						}
 						else
 						{
@@ -377,25 +379,17 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 {
 	Super::OnPossess(aPawn);
 
-	// Seamless Travel 후 게임 맵에서 GameMode BeginPlay가 호출되지 않을 수 있음 → Possess 시점에 랜덤 팀 적용 예약 (폴백)
+	// Seamless Travel 후 게임 맵에서 GameMode BeginPlay가 호출되지 않을 수 있음 → Possess 시점에 랜덤 팀 적용 예약 (폴백, 이미 예약됐으면 한 번만)
 	if (HasAuthority() && aPawn)
 	{
-		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance())) 
 		{
 			if (GI->GetPendingApplyRandomTeamRoles())
-				{
-					ABRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABRGameMode>() : nullptr;
-					if (GM)
-					{
-						FTimerHandle H;
-						GetWorld()->GetTimerManager().SetTimer(H, GM, &ABRGameMode::ApplyRoleChangesForRandomTeams, 1.5f, false);
-						UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] OnPossess 폴백 - 1.5초 후 상체/하체 Pawn 적용 예정"));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 게임 맵 GameMode가 ABRGameMode가 아님 - 상체/하체 적용이 되지 않을 수 있습니다."));
-					}
-				}
+			{
+				ABRGameMode* GM = GetWorld() ? GetWorld()->GetAuthGameMode<ABRGameMode>() : nullptr;
+				if (GM && !GM->HasScheduledInitialRoleApply())
+					GM->ScheduleInitialRoleApplyIfNeeded();
+			}
 		}
 	}
 
@@ -412,13 +406,19 @@ void ABRPlayerController::OnRep_Pawn()
 
 	// 상체 Pawn으로 복제 수신 시, BeginPlay가 Controller 설정 전에 호출될 수 있어
 	// 마우스(Look) 입력이 등록되지 않는 경우 방지: 여기서 입력/뷰 강제 설정
+	ApplyUpperBodyViewAndInput();
+
+	// 순차 스폰 시 복제 타이밍으로 한 클라이언트만 ViewTarget/입력이 누락되는 경우 방지: 한 틱 뒤 재적용
 	if (APawn* MyPawn = GetPawn())
 	{
 		if (IsLocalController() && MyPawn->IsA<AUpperBodyPawn>())
 		{
-			SetupRoleInput(false); // 상체 IMC 등록
-			SetViewTarget(MyPawn);
-			SetIgnoreMoveInput(true);
+			UWorld* W = GetWorld();
+			if (W)
+			{
+				W->GetTimerManager().ClearTimer(UpperBodyViewInputDelayHandle);
+				W->GetTimerManager().SetTimer(UpperBodyViewInputDelayHandle, this, &ABRPlayerController::ApplyUpperBodyViewAndInput, 0.05f, false);
+			}
 		}
 	}
 
@@ -428,12 +428,35 @@ void ABRPlayerController::OnRep_Pawn()
 	}
 }
 
+void ABRPlayerController::ApplyUpperBodyViewAndInput()
+{
+	APawn* MyPawn = GetPawn();
+	if (!MyPawn || !IsLocalController() || !MyPawn->IsA<AUpperBodyPawn>())
+		return;
+
+	SetupRoleInput(false); // 상체 IMC 등록
+	SetViewTarget(MyPawn);
+	SetIgnoreMoveInput(true);
+}
+
+void ABRPlayerController::TryShutdownListenServerForRoomSearch()
+{
+	UWorld* World = GetWorld();
+	if (!World || !GEngine) return;
+	if (World->GetNetMode() != NM_ListenServer) return;
+	// 호스트가 방 나가기 후 메인 맵에만 해당: ListenServer NetDriver를 제거해 Standalone으로 전환하면 방 찾기(FindSessions)가 동작함
+	GEngine->DestroyNamedNetDriver(World, FName(TEXT("GameNetDriver")));
+	UE_LOG(LogTemp, Log, TEXT("[PlayerController] ListenServer NetDriver 종료 - Standalone 전환 (방 찾기 가능)"));
+}
+
 void ABRPlayerController::ClearUIForShutdown()
 {
 	// PIE 종료 시 월드 참조 잔류 방지: GEngine/GameSession 델리게이트를 먼저 끊는다.
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
+		World->GetTimerManager().ClearTimer(UpperBodyViewInputDelayHandle);
+		World->GetTimerManager().ClearTimer(ShutdownListenServerTimerHandle);
 		if (AGameModeBase* GameMode = World->GetAuthGameMode())
 		{
 			if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))
@@ -447,6 +470,8 @@ void ABRPlayerController::ClearUIForShutdown()
 		GEngine->OnNetworkFailure().RemoveAll(this);
 	}
 
+	OnPawnChanged.Clear();
+
 	if (MainScreenWidget && IsValid(MainScreenWidget))
 	{
 		MainScreenWidget->RemoveFromParent();
@@ -455,22 +480,24 @@ void ABRPlayerController::ClearUIForShutdown()
 	if (CurrentMenuWidget && IsValid(CurrentMenuWidget))
 	{
 		CurrentMenuWidget->RemoveFromParent();
-		CurrentMenuWidget = nullptr;
+
+		
 	}
 }
 
 void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
+		World->GetTimerManager().ClearTimer(UpperBodyViewInputDelayHandle);
+		World->GetTimerManager().ClearTimer(ShutdownListenServerTimerHandle);
+	}
 	// PIE/서버 종료 시 위젯을 먼저 정리 — WBP_MainScreen·WBP_EntranceMenu 등이
 	// GetBRPlayerController → SetMainScreenWidget/CreateRoomWithPlayerName 호출 시
 	// PC가 이미 None이 되어 "Accessed None" 크래시가 나는 것을 줄이기 위함
 	ClearUIForShutdown();
-
-	// BeginPlay UI 타이머 해제 (open ?listen 맵 전환 시 파괴 후 콜백 크래시 방지)
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BeginPlayUITimerHandle);
-	}
 
 	// 네트워크 연결 실패 델리게이트 언바인딩
 	if (UEngine* Engine = GEngine)
@@ -479,7 +506,7 @@ void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	// GameSession 이벤트 언바인딩
-	if (UWorld* World = GetWorld())
+	if (World)
 	{
 		if (AGameModeBase* GameMode = World->GetAuthGameMode())
 		{
@@ -672,6 +699,9 @@ void ABRPlayerController::FindRooms()
 {
 	UE_LOG(LogTemp, Log, TEXT("[방 찾기] 명령 실행"));
 	
+	// 한번 호스트였다가 방 나간 경우 ListenServer가 남아 있으면 방 찾기 전에 NetDriver 정리
+	TryShutdownListenServerForRoomSearch();
+	
 	// 화면에 디버그 메시지 표시
 	if (GEngine)
 	{
@@ -742,15 +772,31 @@ void ABRPlayerController::JoinRoom(int32 SessionIndex)
 	// 네트워크 모드 확인
 	ENetMode NetMode = World->GetNetMode();
 	
-	// ListenServer나 DedicatedServer는 JoinRoom을 실행할 수 없음
-	if (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer)
+	// DedicatedServer는 항상 참가 불가. ListenServer는 '현재 활성 세션이 있을 때만' 참가 불가.
+	// (호스트가 방을 나가 세션을 파괴한 뒤 메인 맵으로 돌아온 경우에는 세션이 없으므로 다른 방 참가 허용)
+	if (NetMode == NM_DedicatedServer)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 호스트는 이미 서버이므로 다른 방에 참가할 수 없습니다."));
+		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 전용 서버는 다른 방에 참가할 수 없습니다."));
 		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("[방 참가] 호스트는 다른 방에 참가할 수 없습니다!"));
-		}
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("[방 참가] 전용 서버는 참가할 수 없습니다!"));
 		return;
+	}
+	if (NetMode == NM_ListenServer)
+	{
+		bool bHasActiveSession = false;
+		if (AGameModeBase* GameMode = World->GetAuthGameMode())
+		{
+			if (ABRGameSession* BRGameSession = Cast<ABRGameSession>(GameMode->GameSession))
+				bHasActiveSession = BRGameSession->HasActiveSession();
+		}
+		if (bHasActiveSession)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[방 참가] 호스트는 이미 서버이므로 다른 방에 참가할 수 없습니다."));
+			if (GEngine)
+				GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("[방 참가] 호스트는 다른 방에 참가할 수 없습니다!"));
+			return;
+		}
+		// 세션이 없음 = 방 나간 뒤 메인 맵에 있는 호스트 → 다른 방 참가 허용
 	}
 
 	// [수정] 클라이언트에서 직접 로컬 GameSession을 통해 참가 시도
@@ -1152,11 +1198,12 @@ void ABRPlayerController::RequestMoveMyPlayerToLobbyEntry()
 	if (!GS || !PS) return;
 	const int32 PlayerIndex = GS->PlayerArray.Find(PS);
 	if (PlayerIndex == INDEX_NONE) return;
+	const int32 SlotsPerTeam = 3;
 	for (int32 TeamIndex = 0; TeamIndex < 4; ++TeamIndex)
 	{
-		for (int32 SlotIndex = 0; SlotIndex < 2; ++SlotIndex)
+		for (int32 SlotIndex = 0; SlotIndex < SlotsPerTeam; ++SlotIndex)
 		{
-			const int32 Flat = TeamIndex * 2 + SlotIndex;
+			const int32 Flat = TeamIndex * SlotsPerTeam + SlotIndex;
 			if (GS->LobbyTeamSlots.IsValidIndex(Flat) && GS->LobbyTeamSlots[Flat] == PlayerIndex)
 			{
 				RequestMoveToLobbyEntry(TeamIndex, SlotIndex);
@@ -1205,6 +1252,15 @@ void ABRPlayerController::ClientNotifyGameStarting_Implementation()
 	}
 }
 
+void ABRPlayerController::ClientTravelToGameMap_Implementation(const FString& TravelURL)
+{
+	if (TravelURL.IsEmpty()) return;
+	UWorld* World = GetWorld();
+	if (!World || !IsLocalController()) return;
+	UE_LOG(LogTemp, Log, TEXT("[게임 시작] 클라이언트: 서버 지정 URL로 맵 이동: %s"), *TravelURL);
+	ClientTravel(TravelURL, ETravelType::TRAVEL_Absolute);
+}
+
 void ABRPlayerController::ClientReceiveRoomTitle_Implementation(const FString& RoomTitle)
 {
 	UE_LOG(LogTemp, Log, TEXT("[방 제목] 클라이언트 수신: %s"), *RoomTitle);
@@ -1217,6 +1273,28 @@ void ABRPlayerController::ClientReceiveRoomTitle_Implementation(const FString& R
 			GI->OnRoomTitleReceived.Broadcast();
 		}
 	}
+}
+
+void ABRPlayerController::ClientRequestLobbyUIRefresh_Implementation()
+{
+	// 복제 타이밍을 놓친 클라이언트를 위해 서버가 요청한 로비 UI 갱신.
+	// 짧은 지연 후 GameState에서 Broadcast하여 이미 떠 있는 LobbyMenu가 갱신되도록 함.
+	UWorld* World = GetWorld();
+	if (!World || !IsLocalController()) return;
+
+	TWeakObjectPtr<ABRPlayerController> WeakThis(this);
+	FTimerHandle DummyHandle;
+	World->GetTimerManager().SetTimer(DummyHandle, [WeakThis]()
+	{
+		if (!WeakThis.IsValid()) return;
+		UWorld* W = WeakThis->GetWorld();
+		if (ABRGameState* GS = W ? W->GetGameState<ABRGameState>() : nullptr)
+		{
+			GS->OnPlayerListChanged.Broadcast();
+			GS->OnTeamChanged.Broadcast();
+			UE_LOG(LogTemp, Log, TEXT("[로비 UI] 서버 요청으로 로비 갱신 브로드캐스트 완료"));
+		}
+	}, 0.2f, false);
 }
 
 void ABRPlayerController::RequestRandomTeams()
@@ -1871,6 +1949,11 @@ void ABRPlayerController::LeaveRoom()
 	// 호스트(ListenServer): 세션을 종료하고 메인 맵으로 이동 (모든 클라이언트도 함께 이동)
 	if (NetMode == NM_ListenServer)
 	{
+		// 방을 나가면 더 이상 방장이 아니므로 UserInfo/PlayerState의 bIsHost를 false로 갱신
+		if (ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>())
+		{
+			BRPS->SetIsHost(false);
+		}
 		if (AGameModeBase* GameMode = World->GetAuthGameMode())
 		{
 			if (ABRGameSession* GameSession = Cast<ABRGameSession>(GameMode->GameSession))

@@ -37,7 +37,7 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_LobbySlots, BlueprintReadOnly, Category = "Lobby")
 	TArray<int32> LobbyEntrySlots;
 
-	/** 로비 SelectTeam 슬롯 [팀1~4][1Player/2Player]. 인덱스 = TeamIndex*2 + SlotIndex(0=1Player,1=2Player). 값 = PlayerArray 인덱스 또는 -1 */
+	/** 로비 SelectTeam 슬롯 [팀1~4][관전/하체/상체]. 인덱스 = TeamIndex*3 + SlotIndex(0=관전,1=하체,2=상체). 값 = PlayerArray 인덱스 또는 -1 */
 	UPROPERTY(ReplicatedUsing = OnRep_LobbySlots, BlueprintReadOnly, Category = "Lobby")
 	TArray<int32> LobbyTeamSlots;
 
@@ -69,11 +69,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	TArray<FBRUserInfo> GetLobbyEntryDisplayList() const;
 
-	/** 로비 SelectTeam 팀별 슬롯 표시용. TeamIndex 0~3 = 팀1~4, SlotIndex 0=1Player 1=2Player. 빈 슬롯은 PlayerName 빈 FBRUserInfo */
+	/** 로비 SelectTeam 팀별 슬롯 표시용. TeamIndex 0~3 = 팀1~4, SlotIndex 0=관전 1=하체 2=상체. 빈 슬롯은 PlayerName 빈 FBRUserInfo */
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	FBRUserInfo GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex) const;
 
-	/** 로비 SelectTeam 표시용. 각 플레이어의 TeamID·PlayerIndex(1P=0, 2P=1)로 찾아서 해당 슬롯의 UserInfo 반환. 복제된 PlayerState 기준이라 UI 갱신에 유리 */
+	/** 로비 SelectTeam 표시용. 각 플레이어의 TeamID·PlayerIndex(0=관전, 1=하체, 2=상체)로 찾아서 해당 슬롯의 UserInfo 반환 */
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	FBRUserInfo GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(int32 TeamID, int32 PlayerIndex) const;
 

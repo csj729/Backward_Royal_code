@@ -14,6 +14,7 @@ ABRPlayerState::ABRPlayerState()
 	TeamNumber = 0;
 	bIsHost = false;
 	bIsReady = false;
+	bIsSpectatorSlot = false;
 	bIsLowerBody = true; // 기본값은 하체
 	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
 	UserUID = TEXT("");
@@ -26,6 +27,7 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, TeamNumber);
 	DOREPLIFETIME(ABRPlayerState, bIsHost);
 	DOREPLIFETIME(ABRPlayerState, bIsReady);
+	DOREPLIFETIME(ABRPlayerState, bIsSpectatorSlot);
 	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
 	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
 	DOREPLIFETIME(ABRPlayerState, UserUID);
@@ -139,6 +141,7 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 {
 	if (HasAuthority())
 	{
+		bIsSpectatorSlot = false;
 		bIsLowerBody = bLowerBody;
 		ConnectedPlayerIndex = ConnectedIndex;
 		FString PlayerName = GetPlayerName();
@@ -149,6 +152,23 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 		FString RoleName = bLowerBody ? TEXT("하체") : TEXT("상체");
 		UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: %s 역할 할당 (연결된 플레이어 인덱스: %d)"), 
 			*PlayerName, *RoleName, ConnectedIndex);
+		OnRep_PlayerRole();
+		NotifyUserInfoChanged();
+	}
+}
+
+void ABRPlayerState::SetSpectator(bool bSpectator)
+{
+	if (HasAuthority())
+	{
+		bIsSpectatorSlot = bSpectator;
+		if (bSpectator)
+		{
+			ConnectedPlayerIndex = -1;
+			FString PlayerName = GetPlayerName();
+			if (PlayerName.IsEmpty()) PlayerName = TEXT("Unknown Player");
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 관전(PlayerIndex 0)으로 설정"), *PlayerName);
+		}
 		OnRep_PlayerRole();
 		NotifyUserInfoChanged();
 	}
@@ -248,15 +268,16 @@ FBRUserInfo ABRPlayerState::GetUserInfo() const
 	// 1. 임시 지역 변수 생성
 	FBRUserInfo TempInfo;
 
-	// 2. 기본 정보 취합
+	// 2. 기본 정보 취합. PlayerIndex: 0=관전, 1=하체, 2=상체
 	TempInfo.UserUID = UserUID;
 	TempInfo.PlayerName = GetPlayerName();
 	TempInfo.TeamID = TeamNumber;
 	TempInfo.bIsHost = bIsHost;
 	TempInfo.bIsReady = bIsReady;
+	TempInfo.bIsSpectator = bIsSpectatorSlot;
 	TempInfo.bIsLowerBody = bIsLowerBody;
 	TempInfo.ConnectedPlayerIndex = ConnectedPlayerIndex;
-	TempInfo.PlayerIndex = bIsLowerBody ? 0 : 1;
+	TempInfo.PlayerIndex = bIsSpectatorSlot ? 0 : (bIsLowerBody ? 1 : 2);
 
 	// 3. 커스터마이징 데이터 취합 (중요!)
 	// 클래스 멤버인 CustomizationData를 구조체 필드에 할당

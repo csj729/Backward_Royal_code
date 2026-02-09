@@ -29,7 +29,7 @@ APlayerCharacter::APlayerCharacter()
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 
-	GetMesh()->SetOwnerNoSee(true);
+	//GetMesh()->SetOwnerNoSee(true);  < 몸 투명화
 	GetMesh()->bCastHiddenShadow = true;
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
@@ -39,7 +39,7 @@ APlayerCharacter::APlayerCharacter()
 	{
 		if (Part)
 		{
-			Part->SetOwnerNoSee(true); 
+			//Part->SetOwnerNoSee(true);     <- 몸 투명화
 			Part->bCastHiddenShadow = true;
 
 			// A. [틱 순서 고정] 
@@ -92,7 +92,7 @@ APlayerCharacter::APlayerCharacter()
 
 void APlayerCharacter::BeginPlay()
 {
-	GetMesh()->SetVisibility(false, false);
+	// GetMesh()->SetVisibility(false, false);  <- 몸 투명화
 
 	if (StaminaComp)
 	{

@@ -81,11 +81,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Team", meta = (WorldContext = "WorldContextObject"))
 	static void ChangeTeam(const UObject* WorldContextObject, int32 PlayerIndex, int32 TeamNumber);
 
-	/** 로비: 자신을 SelectTeam 슬롯에 배치 요청. TeamIndex 0~3=팀1~4, SlotIndex 0=1Player 1=2Player */
+	/** 로비: 자신을 SelectTeam 슬롯에 배치 요청. TeamIndex 0~3=팀1~4, SlotIndex 0=관전 1=1Player 2=2Player */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby", meta = (WorldContext = "WorldContextObject"))
 	static void RequestAssignToLobbyTeam(const UObject* WorldContextObject, int32 TeamIndex, int32 SlotIndex);
 
-	/** 로비: 위젯(self)을 Target에 연결해서 팀/대기열 요청. TeamID 0=대기열 이동, 1~4=팀1~4 슬롯 배치. SlotIndex 0=1P 1=2P */
+	/** 로비: 위젯(self)을 Target에 연결해서 팀/대기열 요청. TeamID 0=대기열 이동, 1~4=팀1~4 슬롯 배치. SlotIndex 0=관전 1=1P 2=2P */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|Lobby", meta = (DisplayName = "Request Assign To Lobby Team (From Widget)"))
 	static void RequestAssignToLobbyTeamFromWidget(UUserWidget* Widget, int32 TeamID, int32 SlotIndex);
 
@@ -133,7 +133,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (DisplayName = "Get Display Name For Lobby"))
 	static FString GetDisplayNameForLobby(const FBRUserInfo& UserInfo);
 
-	/** 로비 팀 슬롯 이름 표시용. 플레이어가 있으면 이름, 없으면 SlotIndex 0="1Player" 1="2Player" 반환 */
+	/** 로비 팀 슬롯 이름 표시용. 플레이어가 있으면 이름, 없으면 SlotIndex 0="관전" 1="1Player" 2="2Player" 반환 */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (DisplayName = "Get Display Name For Lobby Slot"))
 	static FString GetDisplayNameForLobbySlot(const FBRUserInfo& UserInfo, int32 SlotIndex);
 

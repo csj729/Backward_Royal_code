@@ -481,7 +481,10 @@ FString UBRWidgetFunctionLibrary::GetDisplayNameForLobbySlot(const FBRUserInfo& 
 	{
 		return Name;
 	}
-	return (SlotIndex == 0) ? TEXT("1Player") : TEXT("2Player");
+	// SlotIndex 0=관전, 1=1Player, 2=2Player
+	if (SlotIndex == 0) return TEXT("관전");
+	if (SlotIndex == 1) return TEXT("1Player");
+	return TEXT("2Player");
 }
 
 ABRPlayerState* UBRWidgetFunctionLibrary::GetBRPlayerState(const UObject* WorldContextObject)

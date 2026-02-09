@@ -1,8 +1,10 @@
 // BRGameState.cpp
 #include "BRGameState.h"
 #include "BRPlayerState.h"
+#include "BRGameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerState.h"
+#include "Engine/World.h"
 
 /** 로비 표시용: 비어 있거나 UserUID와 같으면 "Player N"으로 저장. 패턴 없음. */
 bool ShouldUseFallbackDisplayName(const FString& PlayerName, const FString& UserUID)
@@ -56,9 +58,10 @@ void ABRGameState::UpdatePlayerList()
 			}
 		}
 
-		// 로비 Entry / SelectTeam 슬롯 초기화·갱신 (서버만)
+		// 로비 Entry / SelectTeam 슬롯 초기화·갱신 (서버만). 팀당 3슬롯: 0=관전, 1=하체, 2=상체
 		const int32 NumEntrySlots = 8;
-		const int32 NumTeamSlots = 8; // 4팀 * 2슬롯
+		const int32 SlotsPerTeam = 3;
+		const int32 NumTeamSlots = 4 * SlotsPerTeam; // 12
 		if (LobbyEntrySlots.Num() != NumEntrySlots)
 		{
 			LobbyEntrySlots.SetNum(NumEntrySlots);
@@ -82,9 +85,26 @@ void ABRGameState::UpdatePlayerList()
 		{
 			if (!IsValidPlayerIndex(LobbyTeamSlots[i])) LobbyTeamSlots[i] = -1;
 		}
-		// 새로 들어온 플레이어를 Entry 첫 빈 자리에 배치
+		// [UserInfo 보존] 게임 맵 Travel 직후에는 새 플레이어→대기열 초기화 스킵 (RestorePendingRolesFromTravel에서 역할 복원)
+		UBRGameInstance* GI = GetWorld() ? GetWorld()->GetGameInstance<UBRGameInstance>() : nullptr;
+		const bool bSkipEntryInit = GI && GI->HasPendingRoleRestore();
+
+		// 새로 들어온 플레이어를 Entry 첫 빈 자리에 배치 (Travel 직후 스킵)
+		if (!bSkipEntryInit)
+		{
 		for (int32 i = 0; i < PlayerArray.Num(); i++)
 		{
+			// [인게임 보호] 이미 유효한 팀에 배치된 플레이어(TeamNumber > 0)는 Entry 초기화 대상에서 제외
+			// → 스왑 등의 역할 변경 시 관전으로 리셋되지 않도록 보호
+			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+			{
+				if (BRPS->TeamNumber > 0 && !BRPS->bIsSpectatorSlot)
+				{
+					// 이미 팀에 배치된 플레이어는 건너뛰기
+					continue;
+				}
+			}
+
 			bool bFound = false;
 			for (int32 k : LobbyEntrySlots) { if (k == i) { bFound = true; break; } }
 			if (!bFound)
@@ -94,8 +114,19 @@ void ABRGameState::UpdatePlayerList()
 			if (bFound) continue;
 			for (int32 j = 0; j < LobbyEntrySlots.Num(); j++)
 			{
-				if (LobbyEntrySlots[j] == -1) { LobbyEntrySlots[j] = i; break; }
+				if (LobbyEntrySlots[j] == -1)
+				{
+					LobbyEntrySlots[j] = i;
+					// 대기열(Entry) = 관전. TeamID 0, PlayerIndex 0
+					if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
+					{
+						BRPS->SetTeamNumber(0);
+						BRPS->SetSpectator(true);
+					}
+					break;
+				}
 			}
+		}
 		}
 
 		OnRep_PlayerCount();
@@ -208,9 +239,10 @@ void ABRGameState::AssignRandomTeams()
 		}
 	}
 
-	// 로비 UI 갱신: Entry 비우기, SelectTeam(팀별 상체/하체)에 배정 결과 반영
+	// 로비 UI 갱신: Entry 비우기, SelectTeam(팀별 관전/하체/상체)에 배정 결과 반영. 슬롯 0=관전, 1=하체, 2=상체
 	const int32 NumEntrySlots = 8;
-	const int32 NumTeamSlots = 8; // 4팀 * 2슬롯 (1P=하체, 2P=상체)
+	const int32 SlotsPerTeam = 3;
+	const int32 NumTeamSlots = 4 * SlotsPerTeam; // 12
 	if (LobbyEntrySlots.Num() != NumEntrySlots)
 	{
 		LobbyEntrySlots.SetNum(NumEntrySlots);
@@ -227,10 +259,16 @@ void ABRGameState::AssignRandomTeams()
 	{
 		LobbyTeamSlots[i] = -1;
 	}
-	// 팀 순서대로: 팀0 하체=PlayerIndices[0], 상체=PlayerIndices[1], 팀1 하체=[2], 상체=[3], ...
-	for (int32 i = 0; i < NumPlayers && i < NumTeamSlots; i++)
+	// 팀 순서대로: 팀당 슬롯 0=관전(비움), 1=하체, 2=상체. Flat = team*3 + slot (1 or 2)
+	for (int32 i = 0; i < NumPlayers; i++)
 	{
-		LobbyTeamSlots[i] = PlayerIndices[i];
+		int32 TeamIdx = i / 2;
+		int32 SlotInTeam = 1 + (i % 2); // 1=하체, 2=상체 (관전 슬롯 0은 사용 안 함)
+		int32 Flat = TeamIdx * SlotsPerTeam + SlotInTeam;
+		if (Flat < NumTeamSlots)
+		{
+			LobbyTeamSlots[Flat] = PlayerIndices[i];
+		}
 	}
 
 	// 게임 시작 가능 여부 확인
@@ -369,7 +407,8 @@ TArray<FBRUserInfo> ABRGameState::GetLobbyEntryDisplayList() const
 FBRUserInfo ABRGameState::GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex) const
 {
 	FBRUserInfo Empty;
-	int32 Idx = TeamIndex * 2 + SlotIndex;
+	const int32 SlotsPerTeam = 3;
+	int32 Idx = TeamIndex * SlotsPerTeam + SlotIndex;
 	if (LobbyTeamSlots.Num() <= Idx || Idx < 0) return Empty;
 	int32 Pidx = LobbyTeamSlots[Idx];
 	if (Pidx < 0 || Pidx >= PlayerArray.Num()) return Empty;
@@ -378,7 +417,7 @@ FBRUserInfo ABRGameState::GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex)
 	{
 		FBRUserInfo Info = PlayerListForDisplay[Pidx];
 		Info.TeamID = TeamIndex + 1;
-		Info.PlayerIndex = SlotIndex;  // 0=1P, 1=2P
+		Info.PlayerIndex = SlotIndex;  // 0=관전, 1=하체, 2=상체
 		return Info;
 	}
 	FBRUserInfo Info = GetPlayerUserInfo(Pidx);
@@ -390,14 +429,14 @@ FBRUserInfo ABRGameState::GetLobbyTeamSlotInfo(int32 TeamIndex, int32 SlotIndex)
 FBRUserInfo ABRGameState::GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(int32 TeamID, int32 PlayerIndex) const
 {
 	FBRUserInfo Empty;
-	if (TeamID < 1 || TeamID > 4 || (PlayerIndex != 0 && PlayerIndex != 1)) return Empty;
-	// 각 플레이어의 TeamID(TeamNumber)·PlayerIndex(1P=0, 2P=1)로 찾기 → 서버/클라이언트 모두 복제된 PlayerState 기준으로 표시
+	if (TeamID < 1 || TeamID > 4 || PlayerIndex < 0 || PlayerIndex > 2) return Empty;
+	// 각 플레이어의 TeamID(TeamNumber)·PlayerIndex(0=관전, 1=하체, 2=상체)로 찾기
 	for (int32 i = 0; i < PlayerArray.Num(); i++)
 	{
 		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[i]))
 		{
 			if (BRPS->TeamNumber != TeamID) continue;
-			int32 Slot = BRPS->bIsLowerBody ? 0 : 1;  // 0=1P, 1=2P
+			int32 Slot = BRPS->bIsSpectatorSlot ? 0 : (BRPS->bIsLowerBody ? 1 : 2);
 			if (Slot != PlayerIndex) continue;
 			FBRUserInfo Info = BRPS->GetUserInfo();
 			Info.TeamID = TeamID;
@@ -436,10 +475,11 @@ void ABRGameState::CompactLobbyEntrySlots()
 
 bool ABRGameState::AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, int32 SlotIndex)
 {
+	const int32 SlotsPerTeam = 3;
 	if (!HasAuthority()) return false;
-	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 1) return false;
+	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 2) return false;
 	if (PlayerIndex < 0 || PlayerIndex >= PlayerArray.Num()) return false;
-	const int32 Flat = TeamIndex * 2 + SlotIndex;
+	const int32 Flat = TeamIndex * SlotsPerTeam + SlotIndex;
 	if (LobbyTeamSlots.Num() <= Flat || LobbyEntrySlots.Num() < 8) return false;
 
 	// 이미 이 슬롯에 있으면 아무것도 하지 않음 (같은 버튼 다시 클릭 시 대기열로 돌아가는 버그 방지)
@@ -478,25 +518,30 @@ bool ABRGameState::AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, i
 		}
 	}
 
-	// 팀 선택한 플레이어의 UserInfo(PlayerState) 갱신 → 서버 GameState PlayerListForDisplay 반영
+	// 팀 선택한 플레이어의 UserInfo(PlayerState) 갱신. SlotIndex 0=관전, 1=하체, 2=상체
 	if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[PlayerIndex]))
 	{
-		const int32 NewTeamNumber = TeamIndex + 1;  // TeamIndex 0=1팀, 1=2팀, ...
-		const bool bLowerBody = (SlotIndex == 0);   // 0=1P(하체), 1=2P(상체)
-		const int32 OtherFlat = TeamIndex * 2 + (1 - SlotIndex);
-		const int32 PartnerIndex = (LobbyTeamSlots.IsValidIndex(OtherFlat)) ? LobbyTeamSlots[OtherFlat] : -1;
-
+		const int32 NewTeamNumber = TeamIndex + 1;
 		BRPS->SetTeamNumber(NewTeamNumber);
-		BRPS->SetPlayerRole(bLowerBody, (PartnerIndex >= 0) ? PartnerIndex : -1);
-		// 같은 팀 파트너가 있으면 파트너의 ConnectedPlayerIndex도 갱신
-		if (PartnerIndex >= 0 && PartnerIndex < PlayerArray.Num())
+		if (SlotIndex == 0)
 		{
-			if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(PlayerArray[PartnerIndex]))
+			BRPS->SetSpectator(true);
+		}
+		else
+		{
+			// 1=하체, 2=상체. 파트너는 같은 팀의 다른 플레이 슬롯(1 또는 2)
+			const int32 PartnerSlot = (SlotIndex == 1) ? 2 : 1;
+			const int32 OtherFlat = TeamIndex * SlotsPerTeam + PartnerSlot;
+			const int32 PartnerIndex = (LobbyTeamSlots.IsValidIndex(OtherFlat)) ? LobbyTeamSlots[OtherFlat] : -1;
+			BRPS->SetPlayerRole(SlotIndex == 1, (PartnerIndex >= 0) ? PartnerIndex : -1);
+			if (PartnerIndex >= 0 && PartnerIndex < PlayerArray.Num())
 			{
-				PartnerPS->SetPlayerRole(PartnerPS->bIsLowerBody, PlayerIndex);
+				if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(PlayerArray[PartnerIndex]))
+				{
+					PartnerPS->SetPlayerRole(PartnerPS->bIsLowerBody, PlayerIndex);
+				}
 			}
 		}
-		// 팀 버튼으로 배치된 플레이어 자동 준비 완료 (랜덤 버튼과 동일)
 		if (!BRPS->bIsReady)
 		{
 			BRPS->bIsReady = true;
@@ -505,8 +550,6 @@ bool ABRGameState::AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, i
 	}
 
 	CheckCanStartGame();
-
-	// 대기열 압축: 빈 자리 제거 후 뒤 플레이어를 앞으로 채움 (예: 2번 자리 비면 3번부터 2번 자리로 당겨짐)
 	CompactLobbyEntrySlots();
 	OnPlayerListChanged.Broadcast();
 	return true;
@@ -514,29 +557,33 @@ bool ABRGameState::AssignPlayerToLobbyTeam(int32 PlayerIndex, int32 TeamIndex, i
 
 bool ABRGameState::MovePlayerToLobbyEntry(int32 TeamIndex, int32 SlotIndex)
 {
+	const int32 SlotsPerTeam = 3;
 	if (!HasAuthority()) return false;
-	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 1) return false;
-	const int32 Flat = TeamIndex * 2 + SlotIndex;
+	if (TeamIndex < 0 || TeamIndex > 3 || SlotIndex < 0 || SlotIndex > 2) return false;
+	const int32 Flat = TeamIndex * SlotsPerTeam + SlotIndex;
 	if (LobbyTeamSlots.Num() <= Flat || LobbyEntrySlots.Num() < 8) return false;
 	int32 PlayerIndex = LobbyTeamSlots[Flat];
 	if (PlayerIndex < 0) return false;
 	LobbyTeamSlots[Flat] = -1;
 
-	// 대기열로 나간 플레이어의 UserInfo(PlayerState) 초기화 → 서버 GameState 반영
+	// 대기열로 나간 플레이어의 UserInfo(PlayerState) 초기화. TeamID 0 = 대기열(관전)
 	if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PlayerArray[PlayerIndex]))
 	{
 		BRPS->SetTeamNumber(0);
-		BRPS->SetPlayerRole(true, -1);
-		// 같은 팀에 남아 있는 파트너가 있으면 그쪽 연결 해제
-		const int32 OtherFlat = TeamIndex * 2 + (1 - SlotIndex);
-		if (LobbyTeamSlots.IsValidIndex(OtherFlat))
+		BRPS->SetSpectator(true); // 대기열 = 관전
+		// 같은 팀 슬롯 1/2에 남아 있는 파트너가 있으면 연결 해제
+		for (int32 s = 1; s <= 2; s++)
 		{
-			const int32 PartnerIndex = LobbyTeamSlots[OtherFlat];
-			if (PartnerIndex >= 0 && PartnerIndex < PlayerArray.Num())
+			const int32 OtherFlat = TeamIndex * SlotsPerTeam + s;
+			if (LobbyTeamSlots.IsValidIndex(OtherFlat))
 			{
-				if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(PlayerArray[PartnerIndex]))
+				const int32 PartnerIndex = LobbyTeamSlots[OtherFlat];
+				if (PartnerIndex >= 0 && PartnerIndex < PlayerArray.Num())
 				{
-					PartnerPS->SetPlayerRole(PartnerPS->bIsLowerBody, -1);
+					if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(PlayerArray[PartnerIndex]))
+					{
+						PartnerPS->SetPlayerRole(PartnerPS->bIsLowerBody, -1);
+					}
 				}
 			}
 		}

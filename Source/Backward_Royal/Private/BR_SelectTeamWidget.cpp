@@ -33,13 +33,39 @@ void UBR_SelectTeamWidget::HandlePlayerListChanged()
 	UpdateSlotDisplay();
 }
 
+/** TeamIndex 1~4 → 0~3, 0~3은 그대로. 내부 API는 0~3만 사용 */
+static int32 GetTeamIndex0Based(int32 TeamIndex)
+{
+	if (TeamIndex >= 1 && TeamIndex <= 4) return TeamIndex - 1;
+	return FMath::Clamp(TeamIndex, 0, 3);
+}
+
+/** TeamIndex 1~4 → TeamID 1~4, 0~3 → 1~4 */
+static int32 GetTeamID(int32 TeamIndex)
+{
+	if (TeamIndex >= 1 && TeamIndex <= 4) return TeamIndex;
+	return FMath::Clamp(TeamIndex, 0, 3) + 1;
+}
+
+void UBR_SelectTeamWidget::RequestAssignToTeamSlotSpectator()
+{
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
+		{
+			BRPC->RequestAssignToLobbyTeam(GetTeamIndex0Based(TeamIndex), 0);  // SlotIndex 0 = 관전
+			ScheduleSlotDisplayRefresh();
+		}
+	}
+}
+
 void UBR_SelectTeamWidget::RequestAssignToTeamSlot1P()
 {
 	if (APlayerController* PC = GetOwningPlayer())
 	{
 		if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
 		{
-			BRPC->RequestAssignToLobbyTeam(TeamIndex, 0);  // 1P = SlotIndex 0 → UserInfo PlayerIndex 0
+			BRPC->RequestAssignToLobbyTeam(GetTeamIndex0Based(TeamIndex), 1);  // SlotIndex 1 = 하체(1P)
 			ScheduleSlotDisplayRefresh();
 		}
 	}
@@ -51,7 +77,7 @@ void UBR_SelectTeamWidget::RequestAssignToTeamSlot2P()
 	{
 		if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
 		{
-			BRPC->RequestAssignToLobbyTeam(TeamIndex, 1);  // 2P = SlotIndex 1 → UserInfo PlayerIndex 1
+			BRPC->RequestAssignToLobbyTeam(GetTeamIndex0Based(TeamIndex), 2);  // SlotIndex 2 = 상체(2P)
 			ScheduleSlotDisplayRefresh();
 		}
 	}
@@ -76,28 +102,26 @@ void UBR_SelectTeamWidget::UpdateSlotDisplay_Implementation()
 	ABRGameState* GS = World->GetGameState<ABRGameState>();
 	if (!GS) return;
 
-	const int32 TeamID = TeamIndex + 1;
-	// 1) LobbyTeamSlots + PlayerListForDisplay 우선 (복제 후 이름이 안정적으로 나옴)
-	FBRUserInfo Info0 = GS->GetLobbyTeamSlotInfo(TeamIndex, 0);
-	FBRUserInfo Info1 = GS->GetLobbyTeamSlotInfo(TeamIndex, 1);
-	// 2) 이름이 비어 있으면 PlayerState(TeamID·PlayerIndex) 기준 폴백
+	const int32 TeamIndex0 = GetTeamIndex0Based(TeamIndex);
+	const int32 TeamID = GetTeamID(TeamIndex);
+	// SlotIndex 0=관전, 1=하체, 2=상체
+	FBRUserInfo Info0 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 0);
+	FBRUserInfo Info1 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 1);
+	FBRUserInfo Info2 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 2);
 	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info0).IsEmpty())
-	{
 		Info0 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 0);
-	}
 	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info1).IsEmpty())
-	{
 		Info1 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 1);
-	}
+	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info2).IsEmpty())
+		Info2 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 2);
 	FString Display0 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info0);
 	FString Display1 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info1);
+	FString Display2 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info2);
 
 	if (PlayerNameSlot0)
-	{
-		PlayerNameSlot0->SetText(Display0.IsEmpty() ? FText::GetEmpty() : FText::FromString(Display0));
-	}
+		PlayerNameSlot0->SetText(Display0.IsEmpty() ? FText::FromString(TEXT("관전")) : FText::FromString(Display0));
 	if (PlayerNameSlot1)
-	{
-		PlayerNameSlot1->SetText(Display1.IsEmpty() ? FText::GetEmpty() : FText::FromString(Display1));
-	}
+		PlayerNameSlot1->SetText(Display1.IsEmpty() ? FText::FromString(TEXT("1Player")) : FText::FromString(Display1));
+	if (PlayerNameSlot2)
+		PlayerNameSlot2->SetText(Display2.IsEmpty() ? FText::FromString(TEXT("2Player")) : FText::FromString(Display2));
 }

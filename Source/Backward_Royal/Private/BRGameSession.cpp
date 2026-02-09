@@ -154,13 +154,12 @@ void ABRGameSession::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		SessionInterface->OnDestroySessionCompleteDelegates.RemoveAll(this);
 		SessionInterface->OnFindSessionsCompleteDelegates.RemoveAll(this);
 		SessionInterface->OnJoinSessionCompleteDelegates.RemoveAll(this);
-	}
-	
-	// 검색 중이면 취소
-	if (bIsSearchingSessions && SessionInterface.IsValid())
-	{
-		SessionInterface->CancelFindSessions();
-		bIsSearchingSessions = false;
+
+		if (bIsSearchingSessions)
+		{
+			SessionInterface->CancelFindSessions();
+			bIsSearchingSessions = false;
+		}
 	}
 	
 	// 타이머 정리
@@ -183,16 +182,22 @@ void ABRGameSession::UnbindSessionDelegatesForPIEExit()
 		SessionInterface->OnDestroySessionCompleteDelegates.RemoveAll(this);
 		SessionInterface->OnFindSessionsCompleteDelegates.RemoveAll(this);
 		SessionInterface->OnJoinSessionCompleteDelegates.RemoveAll(this);
+
+		if (bIsSearchingSessions)
+		{
+			SessionInterface->CancelFindSessions();
+			bIsSearchingSessions = false;
+		}
+
 		// PIE 종료 시 남아 있던 세션 파괴 (Unbind 후 호출 — 콜백이 이 객체를 참조하지 않음)
 		if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
 		{
 			SessionInterface->DestroySession(NAME_GameSession);
 		}
-	}
-	if (bIsSearchingSessions && SessionInterface.IsValid())
-	{
-		SessionInterface->CancelFindSessions();
-		bIsSearchingSessions = false;
+
+		// 검색 및 설정 데이터 초기화 (World 참조 잔류 방지)
+		SessionSearch = nullptr;
+		SessionSettings = nullptr;
 	}
 	if (UWorld* World = GetWorld())
 	{
@@ -426,6 +431,16 @@ void ABRGameSession::FindSessionsInternal(bool bIsRetry)
 	
 	bIsSearchingSessions = true;
 	
+	// 방 찾기 시점 NetMode 로그 (한번 호스트였던 경우 Standalone인지 확인용)
+	if (UWorld* World = GetWorld())
+	{
+		ENetMode NetMode = World->GetNetMode();
+		UE_LOG(LogTemp, Log, TEXT("[방 찾기] 검색 시작 - NetMode=%s"),
+			NetMode == NM_Standalone ? TEXT("Standalone") :
+			NetMode == NM_ListenServer ? TEXT("ListenServer") :
+			NetMode == NM_Client ? TEXT("Client") : TEXT("Other"));
+	}
+	
 	// 이전 검색 취소
 	SessionInterface->CancelFindSessions();
 	
@@ -509,7 +524,16 @@ void ABRGameSession::OnCreateSessionCompleteDelegate(FName InSessionName, bool b
 		// NGDA 스타일: CreateSession 성공 후 반드시 StartSession 호출 → OnStartSessionComplete에서 ServerTravel
 		if (SessionInterface.IsValid())
 		{
-			SessionInterface->StartSession(InSessionName);
+			auto Session = SessionInterface->GetNamedSession(InSessionName);
+			if (Session && (Session->SessionState == EOnlineSessionState::Starting || Session->SessionState == EOnlineSessionState::InProgress))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[방 생성] 세션이 이미 시작 중이거나 진행 중입니다 (State: %s). OnStartSessionCompleteDelegate를 직접 호출합니다."), EOnlineSessionState::ToString(Session->SessionState));
+				OnStartSessionCompleteDelegate(InSessionName, true);
+			}
+			else
+			{
+				SessionInterface->StartSession(InSessionName);
+			}
 		}
 		else
 		{
@@ -588,18 +612,18 @@ void ABRGameSession::OnDestroySessionCompleteDelegate(FName InSessionName, bool 
 {
 	UE_LOG(LogTemp, Warning, TEXT("[방 생성] 세션 제거 완료: %s"), bWasSuccessful ? TEXT("성공") : TEXT("실패"));
 
-	// 방 나가기(호스트): 메인 맵으로 이동
+	// 방 나가기(호스트): 메인 맵으로 이동 (listen 없이 이동해 다른 방 참가 가능하도록 함)
 	if (bReturnToMainMenuAfterDestroy)
 	{
 		bReturnToMainMenuAfterDestroy = false;
 		UWorld* World = GetWorld();
 		if (World)
 		{
-			// 프로젝트 설정의 Game Default Map과 동일한 경로 사용 (DefaultEngine.ini)
-			FString DefaultMap = TEXT("/Game/Main/Level/Main_Scene.Main_Scene");
-			FString MapURL = DefaultMap + TEXT("?listen");
-			World->ServerTravel(MapURL, true);
-			UE_LOG(LogTemp, Log, TEXT("[방 나가기] 호스트: 메인 맵으로 이동: %s"), *MapURL);
+			// 프로젝트 설정의 Game Default Map과 동일한 경로 사용. ?listen 제거 → 이 인스턴스는 더 이상 리슨하지 않음.
+			// ServerTravel에는 패키지 경로만 사용 (.MapName 접미사 사용 시 CanServerTravel에서 LongPackageNames 규칙으로 차단됨)
+			FString DefaultMap = TEXT("/Game/Main/Level/Main_Scene");
+			World->ServerTravel(DefaultMap, true);
+			UE_LOG(LogTemp, Log, TEXT("[방 나가기] 호스트: 메인 맵으로 이동 (listen 해제): %s"), *DefaultMap);
 		}
 		return;
 	}
@@ -624,17 +648,18 @@ void ABRGameSession::OnFindSessionsCompleteDelegate(bool bWasSuccessful)
 		Results = SessionSearch->SearchResults;
 		UE_LOG(LogTemp, Warning, TEXT("[방 찾기] 완료: %d개 세션 발견"), Results.Num());
 		
-		// 0건일 때 Steam이면 최대 2회 자동 재검색
+		// 0건일 때 Steam/Null 모두 최대 2회 자동 재검색 (한번 호스트였던 경우 OSS 지연 대응)
 		if (Results.Num() == 0)
 		{
 			IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
 			FString SubsystemName = OnlineSubsystem ? OnlineSubsystem->GetSubsystemName().ToString() : TEXT("NULL");
 			
-			if (SubsystemName.Equals(TEXT("Steam"), ESearchCase::IgnoreCase) &&
-				FindSessionsRetryCount < MaxFindSessionsRetries)
+			const bool bRetryAllowed = (SubsystemName.Equals(TEXT("Steam"), ESearchCase::IgnoreCase) || SubsystemName.Equals(TEXT("NULL"), ESearchCase::IgnoreCase))
+				&& FindSessionsRetryCount < MaxFindSessionsRetries;
+			if (bRetryAllowed)
 			{
 				FindSessionsRetryCount++;
-				UE_LOG(LogTemp, Warning, TEXT("[방 찾기] 세션 0건. 2초 후 재검색 (%d/%d)"), FindSessionsRetryCount, MaxFindSessionsRetries);
+				UE_LOG(LogTemp, Warning, TEXT("[방 찾기] 세션 0건. 2초 후 재검색 (%d/%d) [OSS=%s]"), FindSessionsRetryCount, MaxFindSessionsRetries, *SubsystemName);
 				if (UWorld* World = GetWorld())
 				{
 					World->GetTimerManager().SetTimer(FindSessionsRetryHandle, this, &ABRGameSession::FindSessionsRetryCallback, 2.0f, false);

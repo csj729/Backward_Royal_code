@@ -15,6 +15,8 @@
 #include "NavigationSystem.h"
 #include "Algo/Sort.h"
 #include "TimerManager.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "AssetRegistry/IAssetRegistry.h"
 
 ABRGameMode::ABRGameMode()
 {
@@ -26,6 +28,54 @@ ABRGameMode::ABRGameMode()
 
 	// 리슨 서버 설정
 	bUseSeamlessTravel = true;
+}
+
+void ABRGameMode::ClearGameSessionForPIEExit()
+{
+	GameSession = nullptr;
+}
+
+TArray<FString> ABRGameMode::GetAvailableStageMapPaths() const
+{
+	TArray<FString> Result;
+	if (StageFolderPath.IsEmpty())
+	{
+		return StageMapPathsFallback;
+	}
+
+	IAssetRegistry* AssetRegistry = IAssetRegistry::Get();
+	if (!AssetRegistry)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Stage 맵] Asset Registry를 사용할 수 없어 폴백 목록을 사용합니다."));
+		return StageMapPathsFallback;
+	}
+
+	TArray<FAssetData> AssetDataList;
+	const FName PackagePath(*StageFolderPath);
+	AssetRegistry->GetAssetsByPath(PackagePath, AssetDataList, true, false);
+
+	// UE5: 월드(맵) 에셋만 필터 (클래스 경로 /Script/Engine.World)
+	const FTopLevelAssetPath WorldClassPath(TEXT("/Script/Engine"), TEXT("World"));
+	for (const FAssetData& AssetData : AssetDataList)
+	{
+		if (AssetData.AssetClassPath == WorldClassPath)
+		{
+			FString PackageName = AssetData.PackageName.ToString();
+			if (!PackageName.IsEmpty())
+			{
+				Result.Add(PackageName);
+			}
+		}
+	}
+
+	if (Result.Num() > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Stage 맵] 폴더에서 %d개 맵 수집: %s"), Result.Num(), *StageFolderPath);
+		return Result;
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[Stage 맵] 폴더에서 맵을 찾지 못해 폴백 목록을 사용합니다. (폴더: %s)"), *StageFolderPath);
+	return StageMapPathsFallback;
 }
 
 void ABRGameMode::BeginPlay()
@@ -44,12 +94,18 @@ void ABRGameMode::BeginPlay()
 	if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
 	{
 		if (GI->GetPendingApplyRandomTeamRoles())
-		{
-			FTimerHandle H;
-			GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 1.5f, false);
-			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 게임 맵 로드됨 - 1.5초 후 상체/하체 Pawn 적용 예정"));
-		}
+			ScheduleInitialRoleApplyIfNeeded();
 	}
+}
+
+void ABRGameMode::ScheduleInitialRoleApplyIfNeeded()
+{
+	if (bHasScheduledInitialRoleApply || !GetWorld()) return;
+	bHasScheduledInitialRoleApply = true;
+	// Stage02_Bushes 등 로딩이 느린 맵에서 하체 스폰이 늦는 현상 완화
+	const float InitialDelay = 2.0f;
+	GetWorld()->GetTimerManager().SetTimer(InitialRoleApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, InitialDelay, false);
+	UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] %.1f초 후 상체/하체 Pawn 적용 예정 (한 번만 예약)"), InitialDelay);
 }
 
 void ABRGameMode::PostLogin(APlayerController* NewPlayer)
@@ -63,51 +119,63 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 
 	if (BRPS && BRGameState)
 	{
-		// [보존] 플레이어 이름 설정 및 로그
-		FString PlayerName = BRPS->GetPlayerName();
-		UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin 진입 | bIsLocalPlayer 판단 전 | GetPlayerName()='%s'"), *PlayerName);
-
-		if (PlayerName.IsEmpty())
-		{
-			PlayerName = FString::Printf(TEXT("Player %d"), BRGameState->PlayerArray.Num());
-			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | PlayerName 비어있어 기본값 사용: '%s'"), *PlayerName);
-		}
-
-		// GameInstance 이름은 이 머신의 로컬 플레이어(호스트/Standalone)일 때만 적용.
-		// 클라이언트 입장 시 서버의 GI는 호스트 이름이므로, 원격 클라이언트에 호스트 이름을 덮어쓰지 않음.
+		int32 CurrentPlayerIndex = BRGameState->PlayerArray.Num() - 1;
 		UWorld* WorldForCheck = GetWorld();
 		const bool bIsLocalPlayer = WorldForCheck && (WorldForCheck->GetNetMode() == NM_Standalone || NewPlayer->IsLocalController());
 		UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
-		UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | bIsLocalPlayer=%d | NetMode=%d | IsLocalController=%d"),
-			bIsLocalPlayer ? 1 : 0, WorldForCheck ? (int32)WorldForCheck->GetNetMode() : -1, NewPlayer->IsLocalController() ? 1 : 0);
 
-		if (bIsLocalPlayer && GI)
+		// [UserInfo 보존] 게임 시작 Travel 직후 PostLogin인 경우 저장된 UserInfo 즉시 복원 (나머지는 RestorePendingRolesFromTravel에서)
+		bool bRestoredFromTravel = GI && GI->HasPendingUserInfoForIndex(CurrentPlayerIndex);
+		if (bRestoredFromTravel)
 		{
-			FString SavedPlayerName = GI->GetPlayerName();
-			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 로컬 플레이어 → GI->GetPlayerName()='%s'"), *SavedPlayerName);
-			if (!SavedPlayerName.IsEmpty())
+			GI->RestoreUserInfoToPlayerStateForPostLogin(BRPS, CurrentPlayerIndex);
+		}
+
+		// [보존] 플레이어 이름 설정 및 로그 (Travel 복원이 아닐 때만)
+		FString PlayerName = BRPS->GetPlayerName();
+		UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin 진입 | bIsLocalPlayer=%d | GetPlayerName()='%s' | bRestoredFromTravel=%d"),
+			bIsLocalPlayer ? 1 : 0, *PlayerName, bRestoredFromTravel ? 1 : 0);
+
+		if (!bRestoredFromTravel)
+		{
+			if (PlayerName.IsEmpty())
 			{
-				PlayerName = SavedPlayerName;
-				BRPS->SetPlayerName(PlayerName);
-				UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 로컬: BRPS->SetPlayerName('%s') 적용"), *PlayerName);
+				PlayerName = FString::Printf(TEXT("Player %d"), BRGameState->PlayerArray.Num());
+				UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | PlayerName 비어있어 기본값 사용: '%s'"), *PlayerName);
 			}
-		}
-		// 원격 클라이언트: 이름을 "Player N"으로 덮어쓰지 않음. 빈/PC이름이면 그대로 두고 ServerSetPlayerName 도착 시 실제 이름으로 갱신 → UI는 공란 후 PlayerName 표시
-		if (!bIsLocalPlayer)
-		{
-			const FString CurrentName = BRPS->GetPlayerName();
-			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 원격 클라이언트: GetPlayerName() 유지 '%s' (ServerSetPlayerName 도착 시 갱신)"), *CurrentName);
-		}
 
-		// UserUID 설정 (GameInstance에서 가져오거나 생성)
-		if (GI)
-		{
-			// UserUID가 비어있으면 자동 생성 (예: Steam ID, 계정 ID 등)
-			FString UserUID = FString::Printf(TEXT("Player_%d_%s"), 
-				BRGameState->PlayerArray.Num() - 1, 
-				*FDateTime::Now().ToString());
-			BRPS->SetUserUID(UserUID);
-			UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | SetUserUID('%s') | 최종 PlayerName='%s'"), *UserUID, *BRPS->GetPlayerName());
+			if (bIsLocalPlayer && GI)
+			{
+				FString SavedPlayerName = GI->GetPlayerName();
+				if (!SavedPlayerName.IsEmpty())
+				{
+					PlayerName = SavedPlayerName;
+					BRPS->SetPlayerName(PlayerName);
+					UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 로컬: BRPS->SetPlayerName('%s') 적용"), *PlayerName);
+				}
+			}
+			if (!bIsLocalPlayer)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | 원격 클라이언트: GetPlayerName()='%s' (ServerSetPlayerName 도착 시 갱신)"), *BRPS->GetPlayerName());
+			}
+
+			// UserUID 설정: GI에 저장된 값 우선 사용 (방 입장/게임 시작 시 초기화 방지)
+			if (GI)
+			{
+				FString UserUID;
+				if (bIsLocalPlayer && !GI->GetUserUID().IsEmpty())
+				{
+					UserUID = GI->GetUserUID();
+					UE_LOG(LogTemp, Log, TEXT("[UserInfo 보존] PostLogin | 로컬 GI UserUID 재사용: %s"), *UserUID);
+				}
+				else
+				{
+					UserUID = FString::Printf(TEXT("Player_%d_%s"), CurrentPlayerIndex, *FDateTime::Now().ToString());
+					if (bIsLocalPlayer) GI->SetUserUID(UserUID);
+				}
+				BRPS->SetUserUID(UserUID);
+				UE_LOG(LogTemp, Warning, TEXT("[로비이름] PostLogin | SetUserUID('%s') | 최종 PlayerName='%s'"), *UserUID, *BRPS->GetPlayerName());
+			}
 		}
 
 		// 클라이언트 연결 확인 — 방 생성(ListenServer/Dedicated) 시에만 상세 로그, Standalone은 최소 로그
@@ -141,8 +209,8 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] 참고: 실제 방(세션)을 만들려면 'CreateRoom [방이름]' 명령어 또는 방 생성 버튼을 사용하세요."));
 		}
 
-		// [보존] 방장 설정 — ListenServer/DedicatedServer에서만 적용 (Standalone은 방 생성 버튼 누를 때만 방 생성)
-		if (BRGameState->PlayerArray.Num() == 1 && (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer))
+		// [보존] 방장 설정 — ListenServer/DedicatedServer에서만 적용 (Travel 복원 시 이미 복원됨)
+		if (!bRestoredFromTravel && BRGameState->PlayerArray.Num() == 1 && (NetMode == NM_ListenServer || NetMode == NM_DedicatedServer))
 		{
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] 첫 번째 플레이어이므로 방장으로 설정됩니다."));
 			BRPS->SetIsHost(true);
@@ -170,82 +238,17 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 			UE_LOG(LogTemp, Log, TEXT("[플레이어 입장] Standalone 모드 — 방 생성 버튼을 누르면 방장이 됩니다."));
 		}
 
-		// [보존] 플레이어 역할 할당 로직
-		int32 CurrentPlayerIndex = BRGameState->PlayerArray.Num() - 1;
-
-		if (CurrentPlayerIndex == 0 || CurrentPlayerIndex % 2 == 0)
+		// [A안] 새 접속자는 접속 순(0,1/2,3) 역할 할당 없이 대기열(관전)만. 팀/역할은 랜덤 버튼 또는 1P·2P 선택으로만 설정.
+		// Travel 복원 시에는 RestorePendingRolesFromTravel / RestoreUserInfoToPlayerStateForPostLogin에서 처리.
+		if (!bRestoredFromTravel)
 		{
-			// [하체]
-			BRPS->SetPlayerRole(true, -1);
-			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 하체 역할 할당"), *PlayerName);
-
+			BRPS->SetTeamNumber(0);
+			BRPS->SetSpectator(true); // 대기열 = 관전. UpdatePlayerList()에서 Entry 빈 자리에 배치됨.
 			if (APawn* NewPawn = NewPlayer->GetPawn())
 			{
-				NewPawn->SetOwner(NewPlayer); // RPC 권한 부여
+				NewPawn->SetOwner(NewPlayer);
 			}
-		}
-		else
-		{
-			// [상체]
-			int32 LowerBodyPlayerIndex = CurrentPlayerIndex - 1;
-			if (BRGameState->PlayerArray.IsValidIndex(LowerBodyPlayerIndex))
-			{
-				if (ABRPlayerState* LowerBodyPS = Cast<ABRPlayerState>(BRGameState->PlayerArray[LowerBodyPlayerIndex]))
-				{
-					// NewPlayer가 처음 접속하며 자동으로 배정받은 기본 Pawn을 가져옵니다.
-					APawn* ProxyPawn = NewPlayer->GetPawn();
-					if (ProxyPawn)
-					{
-						UE_LOG(LogTemp, Warning, TEXT("[시스템] %s의 기존 Proxy Pawn(%s)을 삭제합니다."), *PlayerName, *ProxyPawn->GetName());
-						ProxyPawn->Destroy();
-					}
-
-					// 역할 데이터 업데이트
-					BRPS->SetPlayerRole(false, LowerBodyPlayerIndex);
-					LowerBodyPS->SetPlayerRole(true, CurrentPlayerIndex);
-
-					UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 상체 역할 할당 (하체 플레이어 인덱스: %d)"),
-						*PlayerName, LowerBodyPlayerIndex);
-
-					// -----------------------------------------------------------
-					// [추가 기능] 서버 권한 상체 스폰 및 소유권 부여
-					// -----------------------------------------------------------
-					APlayerController* LowerBodyController = Cast<APlayerController>(LowerBodyPS->GetOwningController());
-					if (LowerBodyController && UpperBodyClass)
-					{
-						APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerBodyController->GetPawn());
-						if (LowerChar)
-						{
-							FActorSpawnParameters SpawnParams;
-							SpawnParams.Owner = NewPlayer; // RPC 권한을 위한 소유자 설정
-							SpawnParams.Instigator = NewPlayer->GetPawn();
-							SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-							AUpperBodyPawn* NewUpper = GetWorld()->SpawnActor<AUpperBodyPawn>(
-								UpperBodyClass, LowerChar->GetActorLocation(), LowerChar->GetActorRotation(), SpawnParams
-							);
-
-							if (NewUpper)
-							{
-								// 물리적 부착
-								NewUpper->AttachToComponent(
-									LowerChar->HeadMountPoint,
-									FAttachmentTransformRules::SnapToTargetNotIncludingScale
-								);
-
-								// 상호 참조 연결
-								NewUpper->ParentBodyCharacter = LowerChar;
-								LowerChar->SetUpperBodyPawn(NewUpper);
-
-								// 상체 조종자가 이 Pawn을 직접 제어하도록 빙의
-								NewPlayer->Possess(NewUpper);
-
-								UE_LOG(LogTemp, Log, TEXT("[서버 생성] %s의 상체 Pawn이 생성되어 하체(Index %d)에 부착되었습니다."), *PlayerName, LowerBodyPlayerIndex);
-							}
-						}
-					}
-				}
-			}
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 대기열(관전) 배치 — 팀/역할은 랜덤 버튼 또는 팀 슬롯 선택으로 설정"), *PlayerName);
 		}
 	}
 
@@ -253,6 +256,35 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 	if (BRGameState)
 	{
 		BRGameState->UpdatePlayerList();
+	}
+
+	// 늦게 들어온 클라이언트(2·3·4번째 등) 로비 UI 동기화: 입장한 그 사람에게만 RPC가 가도록 람다로 캡처
+	UWorld* WorldForNet = GetWorld();
+	ENetMode CurrentNetMode = WorldForNet ? WorldForNet->GetNetMode() : NM_Standalone;
+	if (BRGameState->PlayerArray.Num() > 1 && (CurrentNetMode == NM_ListenServer || CurrentNetMode == NM_DedicatedServer))
+	{
+		if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(NewPlayer))
+		{
+			if (!NewPlayer->IsLocalController())
+			{
+				UWorld* W = GetWorld();
+				if (W)
+				{
+					TWeakObjectPtr<ABRPlayerController> WeakPC(BRPC);
+					FTimerDelegate Del = FTimerDelegate::CreateLambda([WeakPC]()
+					{
+						if (ABRPlayerController* PC = WeakPC.Get())
+						{
+							PC->ClientRequestLobbyUIRefresh();
+						}
+					});
+					FTimerHandle H1, H2;
+					W->GetTimerManager().SetTimer(H1, Del, 0.6f, false);
+					W->GetTimerManager().SetTimer(H2, Del, 1.5f, false);
+					UE_LOG(LogTemp, Log, TEXT("[로비 UI] 입장 클라이언트에게 0.6초·1.5초 후 로비 갱신 RPC 예약 (대상 1명)"));
+				}
+			}
+		}
 	}
 }
 
@@ -368,17 +400,36 @@ void ABRGameMode::Logout(AController* Exiting)
 
 void ABRGameMode::ApplyRoleChangesForRandomTeams()
 {
-	if (!HasAuthority() || !UpperBodyClass) return;
+	if (!HasAuthority()) return;
+	// 순차 스폰 진행 중엔 재진입 금지 (OnPossess 등 다른 타이머가 Staged 상태를 덮어쓰지 않도록)
+	if (StagedNumTeams > 0)
+		return;
+	if (!UpperBodyClass)
+	{
+		UE_LOG(LogTemp, Error, TEXT("[랜덤 팀 적용] UpperBodyClass가 설정되지 않았습니다. BP_MainGameMode(또는 사용 중인 GameMode 블루프린트)에서 Upper Body Class에 BP_UpperBodyPawn을 할당하세요."));
+		return;
+	}
 
 	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
 	if (!GI || !GI->GetPendingApplyRandomTeamRoles())
 		return;
-	GI->ClearPendingApplyRandomTeamRoles();
-
-	UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] ApplyRoleChangesForRandomTeams 진입 (1.5초 타이머)"));
 
 	ABRGameState* BRGameState = GetGameState<ABRGameState>();
-	if (!BRGameState || BRGameState->PlayerArray.Num() < 2) return;
+	if (!BRGameState || BRGameState->PlayerArray.Num() < 2)
+		return;
+
+	// 저장된 인원 수만큼 플레이어가 다 들어올 때까지 짧게 대기 (전원 하체로 나오는 현상 방지)
+	const int32 ExpectedCount = GI->GetPendingRoleRestoreCount();
+	if (ExpectedCount > 0 && BRGameState->PlayerArray.Num() < ExpectedCount)
+	{
+		FTimerHandle H;
+		GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 대기 중 (%d/%d), 0.5초 후 재시도"), BRGameState->PlayerArray.Num(), ExpectedCount);
+		return;
+	}
+
+	// 플래그는 하체 Pawn 확인 통과 후에만 클리어 (Pawn 없이 재시도할 때 플래그 유지)
+	UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] ApplyRoleChangesForRandomTeams 진입 (상체/하체 Pawn 적용)"));
 
 	// Seamless Travel 후 PlayerState가 초기화될 수 있으므로, 저장해 둔 팀/역할을 복원
 	GI->RestorePendingRolesFromTravel(BRGameState);
@@ -386,12 +437,15 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// 팀 순서 + 팀 내 하체 먼저: (TeamNumber, bIsLowerBody?0:1) 으로 정렬
+	// 관전자 제외, 팀 순서 + 팀 내 하체 먼저로 정렬 (팀당 하체/상체만 스폰)
 	TArray<ABRPlayerState*> SortedByTeam;
 	for (APlayerState* PS : BRGameState->PlayerArray)
 	{
 		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		{
+			if (BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue; // 관전·대기열 제외
 			SortedByTeam.Add(BRPS);
+		}
 	}
 	Algo::Sort(SortedByTeam, [](const ABRPlayerState* A, const ABRPlayerState* B)
 	{
@@ -401,99 +455,139 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 
 	const int32 NumPlayers = SortedByTeam.Num();
 	const int32 NumTeams = NumPlayers / 2;
-	if (NumTeams < 1) return;
-
-	// 상체로 지정된 플레이어들의 기존(하체) Pawn만 먼저 제거 → 팀당 1개 하체 몸통만 남김
-	for (int32 TeamIndex = 0; TeamIndex < NumTeams; TeamIndex++)
+	if (NumTeams < 1)
 	{
-		ABRPlayerState* UpperPS = SortedByTeam[2 * TeamIndex + 1];
-		if (UpperPS && !UpperPS->bIsLowerBody) // 상체인 경우만
-		{
-			// PlayerState → Controller는 GetOwningController() 사용 (GetOwner()는 PlayerState에서 설정되지 않을 수 있음)
-			APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
-			if (UpperPC)
-			{
-				APawn* OldPawn = UpperPC->GetPawn();
-				UpperPC->UnPossess();
-				if (OldPawn && IsValid(OldPawn))
-					OldPawn->Destroy();
-			}
-		}
+		GI->ClearPendingApplyRandomTeamRoles();
+		GI->ClearPendingRoleRestoreData();
+		return;
 	}
 
-	for (int32 TeamIndex = 0; TeamIndex < NumTeams; TeamIndex++)
+	// 순차 스폰: 1팀 하체 확인 → 1팀 상체 스폰 → 2팀 하체 확인 → 2팀 상체 스폰 … (앞사람이 전부 정상 스폰된 뒤 다음으로 진행)
+	// 기존 순차 스폰 타이머가 있으면 취소
+	World->GetTimerManager().ClearTimer(StagedApplyTimerHandle);
+	StagedSortedByTeam = SortedByTeam;
+	StagedNumTeams = NumTeams;
+	StagedCurrentTeamIndex = 0;
+	StagedPawnWaitRetriesForTeam = 0;
+	ApplyRoleChangesForRandomTeams_ApplyOneTeam();
+}
+
+void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
+{
+	if (!HasAuthority() || !GetWorld()) return;
+
+	UWorld* World = GetWorld();
+	if (StagedCurrentTeamIndex >= StagedNumTeams)
 	{
-		ABRPlayerState* LowerPS = SortedByTeam[2 * TeamIndex];
-		ABRPlayerState* UpperPS = SortedByTeam[2 * TeamIndex + 1];
-		// 역할이 서버에 올바르게 적용되었는지 확인 (하체→상체 순서)
-		if (LowerPS->bIsLowerBody == false || UpperPS->bIsLowerBody == true)
+		if (UBRGameInstance* GI = GetGameInstance<UBRGameInstance>())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 역할 불일치 - 하체:%s 상체:%s, 스킵"), TeamIndex + 1,
-				LowerPS->bIsLowerBody ? TEXT("Y") : TEXT("N"), UpperPS->bIsLowerBody ? TEXT("Y") : TEXT("N"));
-			continue;
+			GI->ClearPendingApplyRandomTeamRoles();
+			GI->ClearPendingRoleRestoreData();
 		}
-		// PlayerState → Controller는 GetOwningController() 사용 (GetOwner()는 null일 수 있어 2팀 상체 등 빙의 실패 원인)
-		APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwningController());
-		APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
-		if (!LowerPC || !UpperPC)
+		StagedSortedByTeam.Empty();
+		StagedNumTeams = 0;
+		StagedCurrentTeamIndex = 0;
+		StagedPawnWaitRetriesForTeam = 0;
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료"));
+		return;
+	}
+
+	const int32 TeamIndex = StagedCurrentTeamIndex;
+	ABRPlayerState* LowerPS = StagedSortedByTeam.IsValidIndex(2 * TeamIndex) ? StagedSortedByTeam[2 * TeamIndex] : nullptr;
+	ABRPlayerState* UpperPS = StagedSortedByTeam.IsValidIndex(2 * TeamIndex + 1) ? StagedSortedByTeam[2 * TeamIndex + 1] : nullptr;
+
+	if (!LowerPS || !UpperPS)
+	{
+		StagedPawnWaitRetriesForTeam = 0;
+		StagedCurrentTeamIndex++;
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+		return;
+	}
+
+	if (LowerPS->bIsLowerBody == false || UpperPS->bIsLowerBody == true)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 역할 불일치 - 스킵"), TeamIndex + 1);
+		StagedPawnWaitRetriesForTeam = 0;
+		StagedCurrentTeamIndex++;
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+		return;
+	}
+
+	APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwningController());
+	APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
+	if (!LowerPC || !UpperPC)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d Controller 없음, 스킵"), TeamIndex + 1);
+		StagedPawnWaitRetriesForTeam = 0;
+		StagedCurrentTeamIndex++;
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+		return;
+	}
+
+	APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());
+	if (!LowerChar || !IsValid(LowerChar))
+	{
+		// Stage02_Bushes 등 맵에서 하체 Pawn 스폰이 늦을 수 있음 → 같은 팀 재시도 (최대 8회, 0.3초 간격)
+		if (StagedPawnWaitRetriesForTeam < MaxStagedPawnWaitRetriesPerTeam)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d Controller 없음 - 하체PC:%s 상체PC:%s, 스킵"),
-				TeamIndex + 1, LowerPC ? TEXT("O") : TEXT("X"), UpperPC ? TEXT("O") : TEXT("X"));
-			continue;
+			StagedPawnWaitRetriesForTeam++;
+			World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, 0.3f, false);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d 하체 Pawn 대기 중 (%d/%d), 0.3초 후 재시도"), TeamIndex + 1, StagedPawnWaitRetriesForTeam, MaxStagedPawnWaitRetriesPerTeam);
+			return;
 		}
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 하체 Pawn 없음(재시도 %d회 초과), 스킵"), TeamIndex + 1, MaxStagedPawnWaitRetriesPerTeam);
+		StagedPawnWaitRetriesForTeam = 0;
+		StagedCurrentTeamIndex++;
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+		return;
+	}
+	StagedPawnWaitRetriesForTeam = 0; // 성공 시 재시도 카운트 초기화
 
-		// 하체 플레이어가 현재 소유한 Pawn 사용 (가입 순서가 아닌 역할 기준)
-		APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());
-		if (!LowerChar || !IsValid(LowerChar))
+	if (LowerPC->GetPawn() != LowerChar)
+	{
+		LowerPC->UnPossess();
+		LowerPC->Possess(LowerChar);
+	}
+
+	APawn* OldUpperPawn = UpperPC->GetPawn();
+	UpperPC->UnPossess();
+	if (OldUpperPawn)
+		OldUpperPawn->Destroy();
+
+	AUpperBodyPawn* OldUpperOnLower = nullptr;
+	for (TActorIterator<AUpperBodyPawn> It(World); It; ++It)
+	{
+		if (It->ParentBodyCharacter == LowerChar)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 하체 플레이어 %s의 Pawn 없음, 스킵"), TeamIndex + 1, *LowerPS->GetPlayerName());
-			continue;
-		}
-
-		// 하체가 해당 LowerChar를 소유하도록
-		if (LowerPC->GetPawn() != LowerChar)
-		{
-			LowerPC->UnPossess();
-			LowerPC->Possess(LowerChar);
-		}
-
-		// 상체가 갖고 있던 기존 Pawn 제거
-		APawn* OldUpperPawn = UpperPC->GetPawn();
-		UpperPC->UnPossess();
-		if (OldUpperPawn)
-			OldUpperPawn->Destroy();
-
-		// 이 하체에 붙어 있던 기존 상체 Pawn 제거 (이터레이터 중 Destroy 방지를 위해 수집 후 제거)
-		AUpperBodyPawn* OldUpperOnLower = nullptr;
-		for (TActorIterator<AUpperBodyPawn> It(World); It; ++It)
-		{
-			if (It->ParentBodyCharacter == LowerChar)
-			{
-				OldUpperOnLower = *It;
-				break;
-			}
-		}
-		if (OldUpperOnLower)
-			OldUpperOnLower->Destroy();
-
-		// 상체 Pawn 스폰 및 부착·빙의
-		FActorSpawnParameters SpawnParams;
-		SpawnParams.Owner = UpperPC;
-		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-		AUpperBodyPawn* NewUpper = World->SpawnActor<AUpperBodyPawn>(
-			UpperBodyClass, LowerChar->GetActorLocation(), LowerChar->GetActorRotation(), SpawnParams);
-		if (NewUpper)
-		{
-			NewUpper->AttachToComponent(
-				LowerChar->HeadMountPoint,
-				FAttachmentTransformRules::SnapToTargetNotIncludingScale);
-			NewUpper->ParentBodyCharacter = LowerChar;
-			LowerChar->SetUpperBodyPawn(NewUpper);
-			UpperPC->Possess(NewUpper);
-			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d: %s 상체 스폰 후 빙의"), TeamIndex + 1, *UpperPS->GetPlayerName());
+			OldUpperOnLower = *It;
+			break;
 		}
 	}
+	if (OldUpperOnLower)
+		OldUpperOnLower->Destroy();
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = UpperPC;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	AUpperBodyPawn* NewUpper = World->SpawnActor<AUpperBodyPawn>(
+		UpperBodyClass, LowerChar->GetActorLocation(), LowerChar->GetActorRotation(), SpawnParams);
+	if (NewUpper)
+	{
+		NewUpper->AttachToComponent(
+			LowerChar->HeadMountPoint,
+			FAttachmentTransformRules::SnapToTargetNotIncludingScale);
+		NewUpper->ParentBodyCharacter = LowerChar;
+		LowerChar->SetUpperBodyPawn(NewUpper);
+		UpperPC->Possess(NewUpper);
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d: %s 상체 스폰 후 빙의 (순차 %d/%d)"), TeamIndex + 1, *UpperPS->GetPlayerName(), TeamIndex + 1, StagedNumTeams);
+	}
+
+	StagedCurrentTeamIndex++;
+	if (StagedCurrentTeamIndex < StagedNumTeams)
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+	else
+		ApplyRoleChangesForRandomTeams_ApplyOneTeam(); // 마지막 팀 처리 후 정리
 }
 
 void ABRGameMode::StartGame()
@@ -557,19 +651,18 @@ void ABRGameMode::StartGame()
 		}
 	}
 
-	// 맵 선택: 랜덤 맵 사용 여부에 따라 결정
+	// 맵 선택: Stage 폴더에서 수집한 맵 중 랜덤 선택 (수집 실패 시 폴백 목록 또는 GameMapPath)
+	TArray<FString> AvailableMaps = GetAvailableStageMapPaths();
 	FString SelectedMapPath;
-	if (bUseRandomMap && StageMapPaths.Num() > 0)
+	if (bUseRandomMap && AvailableMaps.Num() > 0)
 	{
-		// 랜덤으로 Stage 맵 중 하나 선택
-		int32 RandomIndex = FMath::RandRange(0, StageMapPaths.Num() - 1);
-		SelectedMapPath = StageMapPaths[RandomIndex];
-		UE_LOG(LogTemp, Log, TEXT("[게임 시작] 랜덤 맵 선택: %s (인덱스: %d/%d)"), 
-			*SelectedMapPath, RandomIndex + 1, StageMapPaths.Num());
+		int32 RandomIndex = FMath::RandRange(0, AvailableMaps.Num() - 1);
+		SelectedMapPath = AvailableMaps[RandomIndex];
+		UE_LOG(LogTemp, Log, TEXT("[게임 시작] 랜덤 맵 선택: %s (인덱스: %d/%d)"),
+			*SelectedMapPath, RandomIndex + 1, AvailableMaps.Num());
 	}
 	else
 	{
-		// 기존 GameMapPath 사용
 		SelectedMapPath = GameMapPath;
 		UE_LOG(LogTemp, Log, TEXT("[게임 시작] 기본 맵 사용: %s"), *SelectedMapPath);
 	}
@@ -588,6 +681,21 @@ void ABRGameMode::StartGame()
 	{
 		if (ABRGameState* GS = GetGameState<ABRGameState>())
 		{
+			// 방만들고 바로 게임 시작한 경우: 아무도 1P/2P 선택을 안 하면 전원 기본값(하체)로 저장됨 → 게임에서 전원 하체로 나옴.
+			// 상체로 설정된 플레이어가 한 명도 없고 2명 이상이면, 자동으로 랜덤 팀 배정 후 저장.
+			int32 UpperBodyCount = 0;
+			for (APlayerState* PS : GS->PlayerArray)
+			{
+				if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+				{
+					if (!BRPS->bIsLowerBody) UpperBodyCount++;
+				}
+			}
+			if (UpperBodyCount == 0 && GS->PlayerArray.Num() >= 2)
+			{
+				GS->AssignRandomTeams();
+				UE_LOG(LogTemp, Warning, TEXT("[게임 시작] 팀/역할 미선택 상태 → 자동 랜덤 팀 배정 후 저장"));
+			}
 			GI->SavePendingRolesForTravel(GS);
 			GI->SetPendingApplyRandomTeamRoles(true);  // 랜덤이 아니어도 로비 역할(1P=하체, 2P=상체) 적용을 위해 플래그 설정
 			UE_LOG(LogTemp, Warning, TEXT("[게임 시작] Travel 직전 역할 저장 완료 (GameMode), 게임 맵에서 상체/하체 적용 예정"));
@@ -641,15 +749,31 @@ void ABRGameMode::StartGame()
 				{
 					if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
 					{
-						// 클라이언트에게 게임 시작 알림 (RPC)
 						BRPC->ClientNotifyGameStarting();
 					}
 				}
 			}
 			
-			// PIE 환경에서는 ServerTravel이 클라이언트를 자동으로 따라오지 않을 수 있음
-			// 하지만 일반적으로 ServerTravel은 클라이언트가 자동으로 따라옵니다
-			// 서버(호스트)는 ServerTravel 사용 - 클라이언트가 자동으로 따라옵니다
+			// PIE에서는 ServerTravel만으로는 클라이언트가 따라오지 않는 경우가 있으므로,
+			// 원격 클라이언트에게 명시적으로 ClientTravel URL을 보내서 같은 맵으로 이동시킴
+			if (bIsPIE)
+			{
+				// PIE 서버는 ServerConnection이 없으므로 기본 주소 사용 (클라이언트는 이 주소로 접속)
+				FString ServerAddr = TEXT("127.0.0.1:7777");
+				// 클라이언트 이동 URL: "host:port/MapPath" (맵 경로는 /Game/... 형식)
+				FString ClientTravelURL = ServerAddr + SelectedMapPath;
+				for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+				{
+					APlayerController* PC = It->Get();
+					if (!PC || PC->IsLocalController()) continue;
+					if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
+					{
+						BRPC->ClientTravelToGameMap(ClientTravelURL);
+						UE_LOG(LogTemp, Log, TEXT("[게임 시작] PIE: 원격 클라이언트에게 ClientTravel 전송: %s"), *ClientTravelURL);
+					}
+				}
+			}
+			
 			World->ServerTravel(TravelURL, true);
 		}
 }
@@ -680,19 +804,37 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 
 	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 플레이어 사망 확인: %s"), *VictimCharacter->GetName());
 
-	// 캐릭터에서 PlayerController 및 PlayerState 가져오기
-	if (AController* Controller = VictimCharacter->GetController())
-	{
-		if (ABRPlayerState* PS = Controller->GetPlayerState<ABRPlayerState>())
-		{
-			// PlayerState에 사망 상태가 아직 반영 안 되었다면 여기서 확실히 처리
-			if (PS->CurrentStatus != EPlayerStatus::Dead)
-			{
-				PS->SetPlayerStatus(EPlayerStatus::Dead);
-			}
+	ABRGameState* GS = GetGameState<ABRGameState>();
+	if (!GS) return;
 
-			UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 처리 완료"),
-				*PS->GetPlayerName(), PS->TeamNumber);
+	// 캐릭터에서 PlayerController 및 PlayerState 가져오기
+	AController* Controller = VictimCharacter->GetController();
+	if (!Controller) return;
+
+	ABRPlayerState* PS = Controller->GetPlayerState<ABRPlayerState>();
+	if (!PS) return;
+
+	// 1) 사망한 플레이어 → Dead + 관전(PlayerIndex 0)
+	if (PS->CurrentStatus != EPlayerStatus::Dead)
+	{
+		PS->SetPlayerStatus(EPlayerStatus::Dead);
+	}
+	PS->SetSpectator(true);
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 → 관전(PlayerIndex 0)으로 전환"),
+		*PS->GetPlayerName(), PS->TeamNumber);
+
+	// 2) 같은 팀 파트너(상체/하체)도 관전(PlayerIndex 0)으로 전환 (한 몸이므로 둘 다 탈락)
+	if (PS->ConnectedPlayerIndex >= 0 && GS->PlayerArray.IsValidIndex(PS->ConnectedPlayerIndex))
+	{
+		if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[PS->ConnectedPlayerIndex]))
+		{
+			if (PartnerPS->CurrentStatus != EPlayerStatus::Dead)
+			{
+				PartnerPS->SetPlayerStatus(EPlayerStatus::Spectating);
+			}
+			PartnerPS->SetSpectator(true);
+			UE_LOG(LogTemp, Log, TEXT("[GameMode] 파트너 %s (Team %d) → 관전(PlayerIndex 0)으로 전환"),
+				*PartnerPS->GetPlayerName(), PartnerPS->TeamNumber);
 		}
 	}
 

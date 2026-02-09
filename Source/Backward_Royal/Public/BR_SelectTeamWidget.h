@@ -13,9 +13,9 @@ class ABRGameState;
 
 /**
  * 로비 SelectTeam 파츠 위젯 (WBP_SelectTeam용)
- * 팀 하나당 2슬롯(1Player=SlotIndex0, 2Player=SlotIndex1) 표시.
- * TeamIndex 0~3 = 팀1~4. OnPlayerListChanged 시 UpdateSlotDisplay 호출.
- * IBR_LobbyTeamSlotDisplayInterface 구현 → 부모를 바꾸지 않은 WBP_SelectTeam은 블루프린트에서 인터페이스만 구현하면 됨.
+ * 팀 하나당 3슬롯: SlotIndex 0=관전, 1=1Player(하체), 2=2Player(상체).
+ * TeamIndex: 1=1팀, 2=2팀, 3=3팀, 4=4팀 (권장). 0~3도 호환.
+ * OnPlayerListChanged 시 UpdateSlotDisplay 호출.
  */
 UCLASS()
 class BACKWARD_ROYAL_API UBR_SelectTeamWidget : public UUserWidget, public IBR_LobbyTeamSlotDisplayInterface
@@ -23,27 +23,35 @@ class BACKWARD_ROYAL_API UBR_SelectTeamWidget : public UUserWidget, public IBR_L
 	GENERATED_BODY()
 
 public:
-	/** 팀 인덱스 (0=팀1, 1=팀2, 2=팀3, 3=팀4). 블루프린트에서 설정 */
+	/** 팀 번호. 1=1팀, 2=2팀, 3=3팀, 4=4팀 (권장). 0~3도 지원(0=1팀, 1=2팀, ...). 블루프린트에서 설정 */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Lobby")
-	int32 TeamIndex = 0;
+	int32 TeamIndex = 1;
 
-	/** 1Player 이름 표시 (BindWidgetOptional) */
+	/** 관전 슬롯 이름 표시 (BindWidgetOptional). SlotIndex 0 */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> PlayerNameSlot0;
 
-	/** 2Player 이름 표시 (BindWidgetOptional) */
+	/** 1Player(하체) 이름 표시 (BindWidgetOptional). SlotIndex 1 */
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> PlayerNameSlot1;
 
-	/** 이 팀의 1P 버튼 클릭 시 호출. 자신을 이 WBP_SelectTeam의 1P 슬롯에 배치 → UserInfo TeamID/PlayerIndex(0) 반영 */
+	/** 2Player(상체) 이름 표시 (BindWidgetOptional). SlotIndex 2 */
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> PlayerNameSlot2;
+
+	/** 이 팀의 관전 슬롯 클릭 시 호출. SlotIndex 0 = 관전 */
+	UFUNCTION(BlueprintCallable, Category = "Lobby")
+	void RequestAssignToTeamSlotSpectator();
+
+	/** 이 팀의 1P(하체) 버튼 클릭 시 호출. SlotIndex 1 → UserInfo PlayerIndex 1 */
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	void RequestAssignToTeamSlot1P();
 
-	/** 이 팀의 2P 버튼 클릭 시 호출. 자신을 이 WBP_SelectTeam의 2P 슬롯에 배치 → UserInfo TeamID/PlayerIndex(1) 반영 */
+	/** 이 팀의 2P(상체) 버튼 클릭 시 호출. SlotIndex 2 → UserInfo PlayerIndex 2 */
 	UFUNCTION(BlueprintCallable, Category = "Lobby")
 	void RequestAssignToTeamSlot2P();
 
-	/** GameState GetLobbyTeamSlotInfo(TeamIndex, 0/1)로 두 슬롯 텍스트 갱신. OnPlayerListChanged 시 호출 */
+	/** GameState GetLobbyTeamSlotInfo(TeamIndex, 0/1/2)로 세 슬롯 텍스트 갱신. OnPlayerListChanged 시 호출 */
 
 
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Lobby")

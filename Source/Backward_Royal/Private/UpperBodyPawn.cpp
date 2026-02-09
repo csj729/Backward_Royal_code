@@ -1,4 +1,4 @@
-﻿#include "UpperBodyPawn.h"
+#include "UpperBodyPawn.h"
 #include "PlayerCharacter.h"
 #include "DropItem.h"
 #include "BaseWeapon.h"
@@ -23,6 +23,11 @@ AUpperBodyPawn::AUpperBodyPawn()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PostPhysics;
+
+	// 서버에서 스폰된 상체가 모든 클라이언트에 보이도록 복제 명시 (미설정 시 하체만 4명 보이는 현상 방지)
+	bReplicates = true;
+	SetReplicateMovement(true);
+	bOnlyRelevantToOwner = false;
 
 	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 
