@@ -82,12 +82,18 @@ APlayerCharacter::APlayerCharacter()
 	// 3. [신규] 스태미나 컴포넌트 생성
 	StaminaComp = CreateDefaultSubobject<UStaminaComponent>(TEXT("StaminaComp"));
 
-	// [네트워크]
+	// [네트워크] 클라이언트 예측/서버 보정 및 스무딩 튜닝 (고지연·패킷유실 환경 대응)
 	bReplicates = true;
 	SetNetUpdateFrequency(144.0f);
 	SetMinNetUpdateFrequency(100.0f);
 
-	GetCharacterMovement()->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
+	UCharacterMovementComponent* MoveComp = GetCharacterMovement();
+	MoveComp->NetworkSmoothingMode = ENetworkSmoothingMode::Exponential;
+	// 고지연(100ms+) 환경: 보정 허용 거리 확대 → 불필요한 보정·덜컹임 감소
+	MoveComp->NetworkMaxSmoothUpdateDistance = 256.0f;   // 이 거리 이하만 스무딩, 그 이상은 보정 허용
+	MoveComp->NetworkNoSmoothUpdateDistance = 0.0f;    // 0 = 작은 오차도 스무딩으로 흡수
+	// 서버-클라이언트 위치 오차가 이 값(단위: cm) 이하면 보정 생략 → 핑 높을 때 덜 튐
+	MoveComp->NetworkLargeClientCorrectionDistance = 500.0f;
 }
 
 void APlayerCharacter::BeginPlay()
@@ -484,11 +490,13 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 
 void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 {
+	LOG_PLAYER(Log, TEXT("ApplyMeshFromID 시작 - Slot: %d, ID: %d"), (int32)Slot, MeshID);
+
 	// 1. GameInstance 가져오기
 	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
 	if (!GI)
 	{
-		// 에디터 등에서 PIE 시작 전이거나 엣지 케이스
+		LOG_PLAYER(Error, TEXT("GameInstance를 찾을 수 없습니다."));
 		return;
 	}
 

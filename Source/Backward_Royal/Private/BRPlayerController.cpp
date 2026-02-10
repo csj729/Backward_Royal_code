@@ -382,7 +382,7 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 	// Seamless Travel 후 게임 맵에서 GameMode BeginPlay가 호출되지 않을 수 있음 → Possess 시점에 랜덤 팀 적용 예약 (폴백, 이미 예약됐으면 한 번만)
 	if (HasAuthority() && aPawn)
 	{
-		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance())) 
+		if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
 		{
 			if (GI->GetPendingApplyRandomTeamRoles())
 			{
@@ -481,7 +481,7 @@ void ABRPlayerController::ClearUIForShutdown()
 	{
 		CurrentMenuWidget->RemoveFromParent();
 
-		
+
 	}
 }
 
@@ -589,6 +589,27 @@ void ABRPlayerController::HandleNetworkFailure(UWorld* World, UNetDriver* NetDri
 		UE_LOG(LogTemp, Error, TEXT("  3. 서버가 다른 맵을 로드하지 않음"));
 		UE_LOG(LogTemp, Error, TEXT("  4. 네트워크 연결 문제"));
 	}
+}
+
+void ABRPlayerController::StartSpectatingMode()
+{
+	if (!HasAuthority()) return;
+
+	// 1. 현재 폰 파괴 (선택 사항이지만 관전 모드 전환 시 깔끔하게 제거하거나 래그돌로 남길 수 있음)
+	// ChangeState(NAME_Spectating)을 호출하면 자동으로 UnPossess가 일어납니다.
+
+	// 2. 관전 상태로 전환
+	// 이 함수는 APlayerController의 protected 멤버이지만, 상속받은 클래스 내부에서는 호출 가능합니다.
+	ChangeState(NAME_Spectating);
+
+	// 3. 클라이언트에게 UI 변경 알림
+	ClientHandleSpectatorUI();
+}
+
+void ABRPlayerController::ClientHandleSpectatorUI_Implementation()
+{
+	// 블루프린트에서 구현된 이벤트 호출 (HUD 숨기기 등)
+	OnEnterSpectatorMode();
 }
 
 void ABRPlayerController::CreateRoom(const FString& RoomName)
@@ -701,7 +722,7 @@ void ABRPlayerController::FindRooms()
 	
 	// 한번 호스트였다가 방 나간 경우 ListenServer가 남아 있으면 방 찾기 전에 NetDriver 정리
 	TryShutdownListenServerForRoomSearch();
-	
+
 	// 화면에 디버그 메시지 표시
 	if (GEngine)
 	{

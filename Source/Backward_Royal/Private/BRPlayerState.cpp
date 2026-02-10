@@ -354,3 +354,24 @@ void ABRPlayerState::OnRep_PlayerStatus()
 	// 2. 로그
 	UE_LOG(LogTemp, Log, TEXT("Player %s Status Changed to %d"), *GetPlayerName(), (int32)CurrentStatus);
 }
+
+void ABRPlayerState::CopyProperties(APlayerState* PlayerState)
+{
+	Super::CopyProperties(PlayerState);
+
+	// 새로 생성된 PlayerState로 형변환
+	ABRPlayerState* NewBRPlayerState = Cast<ABRPlayerState>(PlayerState);
+	if (NewBRPlayerState)
+	{
+		// [중요] 기존 데이터를 새 PlayerState로 복사
+		NewBRPlayerState->CustomizationData = CustomizationData; // 커스터마이징 정보 유지
+		NewBRPlayerState->TeamNumber = TeamNumber;               // 팀 번호 유지
+		NewBRPlayerState->bIsHost = bIsHost;                     // 방장 권한 유지
+		NewBRPlayerState->bIsReady = bIsReady;                   // 준비 상태 유지 (필요 시)
+		NewBRPlayerState->bIsLowerBody = bIsLowerBody;           // 역할(상/하체) 유지
+		NewBRPlayerState->UserUID = UserUID;                     // UID 유지
+		NewBRPlayerState->ConnectedPlayerIndex = ConnectedPlayerIndex; // 연결 정보 유지
+
+		UE_LOG(LogTemp, Log, TEXT("[CopyProperties] %s의 데이터가 다음 레벨로 복사되었습니다."), *GetPlayerName());
+	}
+}

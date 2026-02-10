@@ -176,6 +176,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Customization")
 	void SubmitCustomizationToServer();
 
+	// 관전 모드로 전환 (서버에서 호출)
+	UFUNCTION(BlueprintCallable, Category = "Spectating")
+	void StartSpectatingMode();
+
+	// [클라이언트] 관전 모드 진입 시 UI 처리 요청
+	UFUNCTION(Client, Reliable)
+	void ClientHandleSpectatorUI();
+
+	// [BP 구현] 관전 모드 진입 시 UI 변경 (HUD 숨기기 등)
+	UFUNCTION(BlueprintImplementableEvent, Category = "Spectating")
+	void OnEnterSpectatorMode();
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;

@@ -61,12 +61,19 @@ public:
 	// 랜덤 팀 배정 후 상체/하체 Pawn 재배치 (상체 스폰 및 빙의)
 	void ApplyRoleChangesForRandomTeams();
 
-	// 팀별 상체 스폰 간격(초). 순차 스폰으로 복제/초기화 타이밍 버그 완화
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SpawnDelayBetweenTeams = 0.3f;
+	// 팀별 상체 스폰 간격(초). 이전 팀 상체 스폰/빙의/복제가 완료된 뒤에만 다음 팀 진행 (1팀 하체→상체 완료 후 2팀 진행)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings", meta = (ClampMin = "0.5", ClampMax = "3.0"))
+	float SpawnDelayBetweenTeams = 1.2f;
+
+	/** 팀에 배정된 인원(TeamNumber>0, 대기열 관전 제외)만으로 고정 스폰 수: N명 시 하체 N/2, 상체 N/2. 4명→하체2 상체2, 6명→하체3 상체3 */
+	static int32 GetExpectedLowerBodyCount(int32 NumPlayersInTeamsOnly) { return NumPlayersInTeamsOnly / 2; }
+	static int32 GetExpectedUpperBodyCount(int32 NumPlayersInTeamsOnly) { return NumPlayersInTeamsOnly / 2; }
 
 	// 플레이어 사망 시 호출되는 함수
 	void OnPlayerDied(class ABaseCharacter* VictimCharacter);
+
+	// 2초 후 팀 전체를 관전 모드로 전환하는 함수
+	void SwitchTeamToSpectator(TWeakObjectPtr<class ABRPlayerController> VictimPC, TWeakObjectPtr<class ABRPlayerController> PartnerPC);
 
 protected:
 	virtual void BeginPlay() override;
@@ -86,11 +93,30 @@ protected:
 	TArray<ABRPlayerState*> StagedSortedByTeam;
 	int32 StagedNumTeams = 0;
 	int32 StagedCurrentTeamIndex = 0;
+	/** 순차 상체 스폰에서 실제로 스폰된 상체 수 (완료 시 로그/경고용) */
+	int32 StagedUpperBodiesSpawnedCount = 0;
+	/** 전체 하체 Pawn 준비 대기 재시도 횟수 (로딩 빠른 맵에서 전원 하체 스폰 완료 후 상체 적용) */
+	int32 StagedAllLowerReadyRetries = 0;
+	FTimerHandle StagedAllLowerReadyHandle;
+	/** 하체 Pawn 대기 재진입 시 팀 목록 고정용. 재진입 시 PlayerArray 기준 재구성하면 일부가 TeamNumber 0으로 바뀌어 3명만 남는 현상 방지 */
+	TArray<ABRPlayerState*> PendingSortedByTeamSnapshot;
 	/** 팀별 상체 스폰 시 하체 Pawn 없을 때 같은 팀 재시도 횟수 (Stage02_Bushes 등 느린 맵 대응) */
 	int32 StagedPawnWaitRetriesForTeam = 0;
 	static constexpr int32 MaxStagedPawnWaitRetriesPerTeam = 8;
+	/** 팀별 Controller 없을 때 같은 팀 재시도. 1팀 하체→상체 완료 후 다음 팀 진행하듯, 해당 팀 Controller가 서버에 올 때까지 대기 */
+	int32 StagedControllerWaitRetriesForTeam = 0;
+	static constexpr int32 MaxStagedControllerWaitRetriesForTeam = 40;  // 0.5초×40 = 20초 (하체 Pawn 대기와 동일하게 생성될 때까지 대기)
 	FTimerHandle StagedApplyTimerHandle;
 	FTimerHandle InitialRoleApplyTimerHandle;
+	/** 테스트 맵 직접 실행(로비 없음) 시 2초 후 역할 적용 폴백용 */
+	FTimerHandle DirectStartRoleApplyTimerHandle;
+
+	/** 테스트 맵을 로비 없이 바로 실행했을 때: 저장된 역할이 없고 전원 하체면 랜덤 팀 배정 후 상체/하체 적용 */
+	void TryApplyDirectStartRolesFallback();
+
+	/** 플레이어 대기 재시도 횟수. 최대 초과 시 현재 인원으로 진행해 상체 스폰 시도 (하체만 4명 방지) */
+	int32 InitialPlayerWaitRetries = 0;
+	static constexpr int32 MaxInitialPlayerWaitRetries = 24;  // 0.5초×24 = 12초
 
 	/** 1.5초 폴백 타이머가 이미 예약되었으면 true (OnPossess 중복 예약 방지) */
 	bool bHasScheduledInitialRoleApply = false;

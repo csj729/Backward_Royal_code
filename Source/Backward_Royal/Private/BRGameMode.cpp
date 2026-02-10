@@ -94,8 +94,43 @@ void ABRGameMode::BeginPlay()
 	if (UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance()))
 	{
 		if (GI->GetPendingApplyRandomTeamRoles())
+		{
 			ScheduleInitialRoleApplyIfNeeded();
+		}
+		else
+		{
+			// 테스트 맵 직접 실행(로비 없음): 2초 후 저장된 역할 없고 전원 하체면 자동 랜덤 팀 배정 후 상체/하체 적용
+			GetWorld()->GetTimerManager().SetTimer(DirectStartRoleApplyTimerHandle, this, &ABRGameMode::TryApplyDirectStartRolesFallback, 2.0f, false);
+		}
 	}
+}
+
+void ABRGameMode::TryApplyDirectStartRolesFallback()
+{
+	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+	ABRGameState* BRGameState = GetGameState<ABRGameState>();
+	if (!GI || !BRGameState || GI->GetPendingApplyRandomTeamRoles())
+		return;
+	if (BRGameState->PlayerArray.Num() < 2)
+		return;
+
+	int32 UpperBodyCount = 0;
+	for (APlayerState* PS : BRGameState->PlayerArray)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		{
+			if (!BRPS->bIsLowerBody) UpperBodyCount++;
+		}
+	}
+	if (UpperBodyCount > 0)
+		return;
+
+	// 저장된 역할 없고 전원 하체 → 랜덤 팀 배정 후 저장·적용
+	BRGameState->AssignRandomTeams();
+	GI->SavePendingRolesForTravel(BRGameState);
+	GI->SetPendingApplyRandomTeamRoles(true);
+	UE_LOG(LogTemp, Warning, TEXT("[게임 맵 직접 실행] 팀/역할 미선택 → 자동 랜덤 팀 배정 후 상체/하체 적용"));
+	ApplyRoleChangesForRandomTeams();
 }
 
 void ABRGameMode::ScheduleInitialRoleApplyIfNeeded()
@@ -418,43 +453,190 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 	if (!BRGameState || BRGameState->PlayerArray.Num() < 2)
 		return;
 
-	// 저장된 인원 수만큼 플레이어가 다 들어올 때까지 짧게 대기 (전원 하체로 나오는 현상 방지)
+	// 저장된 인원 수만큼 플레이어가 다 들어올 때까지 짧게 대기 (전원 하체로 나오는 현상 방지). 최대 재시도 후에는 현재 인원으로 진행
 	const int32 ExpectedCount = GI->GetPendingRoleRestoreCount();
 	if (ExpectedCount > 0 && BRGameState->PlayerArray.Num() < ExpectedCount)
 	{
-		FTimerHandle H;
-		GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
-		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 대기 중 (%d/%d), 0.5초 후 재시도"), BRGameState->PlayerArray.Num(), ExpectedCount);
-		return;
+		if (InitialPlayerWaitRetries >= MaxInitialPlayerWaitRetries)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 플레이어 대기 %d회 초과 → 현재 인원(%d명)으로 상체/하체 적용 진행 (하체만 스폰 방지)"), MaxInitialPlayerWaitRetries, BRGameState->PlayerArray.Num());
+			InitialPlayerWaitRetries = 0;
+		}
+		else
+		{
+			InitialPlayerWaitRetries++;
+			FTimerHandle H;
+			GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 대기 중 (%d/%d), 0.5초 후 재시도 (%d/%d)"), BRGameState->PlayerArray.Num(), ExpectedCount, InitialPlayerWaitRetries, MaxInitialPlayerWaitRetries);
+			return;
+		}
+	}
+	else
+	{
+		InitialPlayerWaitRetries = 0;
 	}
 
 	// 플래그는 하체 Pawn 확인 통과 후에만 클리어 (Pawn 없이 재시도할 때 플래그 유지)
 	UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] ApplyRoleChangesForRandomTeams 진입 (상체/하체 Pawn 적용)"));
 
-	// Seamless Travel 후 PlayerState가 초기화될 수 있으므로, 저장해 둔 팀/역할을 복원
-	GI->RestorePendingRolesFromTravel(BRGameState);
+	// '전체 하체 Pawn 대기' 재진입 시에는 역할 복원/재계산 스킵 (이미 복원된 역할이 덮어씌워져 전원 하체가 되는 것 방지)
+	const bool bIsRetryWaitingForLowerPawns = (StagedAllLowerReadyRetries > 0);
+	if (!bIsRetryWaitingForLowerPawns)
+	{
+		// Seamless Travel 후 PlayerState가 초기화될 수 있으므로, 저장해 둔 팀/역할을 복원
+		GI->RestorePendingRolesFromTravel(BRGameState);
+
+		// 복원된 ConnectedPlayerIndex는 로비 시점 PlayerArray 기준이므로, 현재 배열 기준으로 파트너 인덱스 재계산 (Travel 후 접속 순서 변경 시 잘못된 참조 방지)
+		for (int32 i = 0; i < BRGameState->PlayerArray.Num(); i++)
+		{
+			ABRPlayerState* BRPS = Cast<ABRPlayerState>(BRGameState->PlayerArray[i]);
+			if (!BRPS || BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue;
+			int32 PartnerIndex = -1;
+			for (int32 j = 0; j < BRGameState->PlayerArray.Num(); j++)
+			{
+				if (i == j) continue;
+				ABRPlayerState* Other = Cast<ABRPlayerState>(BRGameState->PlayerArray[j]);
+				if (!Other || Other->TeamNumber != BRPS->TeamNumber) continue;
+				if (Other->bIsLowerBody != BRPS->bIsLowerBody) { PartnerIndex = j; break; }
+			}
+			BRPS->SetPlayerRole(BRPS->bIsLowerBody, PartnerIndex);
+		}
+		// [진단] 복원 직후 팀/플레이어 인덱스·역할
+		for (int32 i = 0; i < BRGameState->PlayerArray.Num(); i++)
+		{
+			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(BRGameState->PlayerArray[i]))
+			{
+				UE_LOG(LogTemp, Log, TEXT("[진단] 복원후 PlayerArray[%d] %s | TeamNumber=%d | %s | ConnectedIdx=%d"),
+					i, *BRPS->GetPlayerName(), BRPS->TeamNumber, BRPS->bIsLowerBody ? TEXT("하체") : TEXT("상체"), BRPS->ConnectedPlayerIndex);
+			}
+		}
+	}
 
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// 관전자 제외, 팀 순서 + 팀 내 하체 먼저로 정렬 (팀당 하체/상체만 스폰)
+	// '하체 Pawn 대기' 재진입 시: 팀 목록을 첫 진입 시 스냅샷으로 고정 (재진입 시 PlayerArray 기준으로 다시 만들면 일부가 TeamNumber 0으로 바뀌어 3명만 남아 하체3+상체1 발생)
 	TArray<ABRPlayerState*> SortedByTeam;
-	for (APlayerState* PS : BRGameState->PlayerArray)
+	int32 NumPlayersInTeams = 0;
+	int32 NumTeams = 0;
+	if (bIsRetryWaitingForLowerPawns && PendingSortedByTeamSnapshot.Num() > 0)
 	{
-		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		SortedByTeam = PendingSortedByTeamSnapshot;
+		NumPlayersInTeams = SortedByTeam.Num();
+		NumTeams = NumPlayersInTeams / 2;
+		UE_LOG(LogTemp, Log, TEXT("[진단] 재진입: 저장된 팀 스냅샷 사용 %d명 (하체 Pawn 대기 재시도 중 팀 수 고정)"), NumPlayersInTeams);
+	}
+	else
+	{
+		PendingSortedByTeamSnapshot.Empty();
+		// 대기열·관전(TeamNumber<=0) 제외, 팀에 배정된 플레이어만 수집 후 팀 순서 + 팀 내 하체 먼저로 정렬
+		for (APlayerState* PS : BRGameState->PlayerArray)
 		{
-			if (BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue; // 관전·대기열 제외
-			SortedByTeam.Add(BRPS);
+			if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+			{
+				if (BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue; // 관전·대기열 제외
+				SortedByTeam.Add(BRPS);
+			}
+		}
+		Algo::Sort(SortedByTeam, [](const ABRPlayerState* A, const ABRPlayerState* B)
+		{
+			if (A->TeamNumber != B->TeamNumber) return A->TeamNumber < B->TeamNumber;
+			return A->bIsLowerBody && !B->bIsLowerBody; // 하체 먼저
+		});
+		NumPlayersInTeams = SortedByTeam.Num();
+		NumTeams = NumPlayersInTeams / 2;
+	}
+	const int32 ExpectedLowerCount = ABRGameMode::GetExpectedLowerBodyCount(NumPlayersInTeams);
+	const int32 ExpectedUpperCount = ABRGameMode::GetExpectedUpperBodyCount(NumPlayersInTeams);
+
+	// [진단] SortedByTeam 구성 결과 (팀 배정 인원만, 관전 제외) + 고정 스폰 수
+	UE_LOG(LogTemp, Log, TEXT("[진단] 팀 배정 인원(관전 제외): %d명, 팀 수 %d (고정: 하체 %d명, 상체 %d명)"), NumPlayersInTeams, NumTeams, ExpectedLowerCount, ExpectedUpperCount);
+	for (int32 i = 0; i < SortedByTeam.Num(); i++)
+	{
+		if (const ABRPlayerState* PS = SortedByTeam[i])
+		{
+			UE_LOG(LogTemp, Log, TEXT("[진단]   Sorted[%d] 팀%d %s %s"), i, PS->TeamNumber, PS->bIsLowerBody ? TEXT("하체") : TEXT("상체"), *PS->GetPlayerName());
 		}
 	}
-	Algo::Sort(SortedByTeam, [](const ABRPlayerState* A, const ABRPlayerState* B)
-	{
-		if (A->TeamNumber != B->TeamNumber) return A->TeamNumber < B->TeamNumber;
-		return A->bIsLowerBody && !B->bIsLowerBody; // 하체 먼저
-	});
 
-	const int32 NumPlayers = SortedByTeam.Num();
-	const int32 NumTeams = NumPlayers / 2;
+	// [안전장치] 팀에 배정된 사람이 없거나, 일부만 팀 배정됐거나, 역할 분포/팀별 쌍이 잘못된 경우 게임 맵에서 랜덤 팀/역할 재배정
+	// (총 4명인데 팀 배정 2명이면 팀 수 1 → 상체 1명만 스폰 → 하체3+상체1 현상)
+	if (!bIsRetryWaitingForLowerPawns)
+	{
+		int32 TotalBRPS = 0;
+		for (APlayerState* PS : BRGameState->PlayerArray) { if (Cast<ABRPlayerState>(PS)) TotalBRPS++; }
+		// 팀 미배정 인원이 있으면(복원 실패 등) 전원 팀 배정 → 하체/상체 수를 고정 규칙대로 맞춤
+		const bool bSomeNotInTeam = (TotalBRPS >= 2 && (TotalBRPS % 2 == 0) && NumPlayersInTeams < TotalBRPS);
+		int32 UpperCountInSorted = 0;
+		int32 LowerCountInSorted = 0;
+		for (const ABRPlayerState* PS : SortedByTeam)
+		{
+			if (PS && !PS->bIsLowerBody) UpperCountInSorted++;
+			else if (PS) LowerCountInSorted++;
+		}
+		// 고정 규칙: 플레이어 수에 따라 상체/하체 수는 반드시 N/2 each
+		const bool bCountMismatch = (UpperCountInSorted != ExpectedUpperCount) || (LowerCountInSorted != ExpectedLowerCount);
+		bool bTeamPairInvalid = false;
+		for (int32 t = 0; t < NumTeams; t++)
+		{
+			ABRPlayerState* Lower = SortedByTeam.IsValidIndex(2 * t) ? SortedByTeam[2 * t] : nullptr;
+			ABRPlayerState* Upper = SortedByTeam.IsValidIndex(2 * t + 1) ? SortedByTeam[2 * t + 1] : nullptr;
+			if (!Lower || !Upper || !Lower->bIsLowerBody || Upper->bIsLowerBody)
+			{
+				bTeamPairInvalid = true;
+				UE_LOG(LogTemp, Warning, TEXT("[진단] 팀 %d 역할 쌍 이상: 하체슬롯=%s(%d) 상체슬롯=%s(%d) → 랜덤 재배정 필요"),
+					t + 1, Lower ? *Lower->GetPlayerName() : TEXT("없음"), Lower ? (Lower->bIsLowerBody ? 1 : 0) : -1,
+					Upper ? *Upper->GetPlayerName() : TEXT("없음"), Upper ? (Upper->bIsLowerBody ? 1 : 0) : -1);
+				break;
+			}
+		}
+		const bool bNeedRandomAssign = (NumTeams < 1 && TotalBRPS >= 2)
+			|| bSomeNotInTeam
+			|| (NumPlayersInTeams >= 2 && (bCountMismatch || bTeamPairInvalid));
+		if (bNeedRandomAssign)
+		{
+			if (bSomeNotInTeam)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 미배정 인원 있음(전체 %d명 중 팀 배정 %d명) → 전원 팀/역할 재배정 (하체3+상체1 방지)"), TotalBRPS, NumPlayersInTeams);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 역할/팀 배정 없음 또는 분포/팀쌍 이상(현재 하체%d 상체%d, 고정 규칙 하체%d 상체%d) → 게임 맵에서 랜덤 팀/역할 재배정"), LowerCountInSorted, UpperCountInSorted, ExpectedLowerCount, ExpectedUpperCount);
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[진단] 하체3+상체1 원인: 팀 미배정 또는 팀별 하체1+상체1 아님 → 안전장치로 랜덤 재배정 실행"));
+			BRGameState->AssignRandomTeams();
+			for (int32 i = 0; i < BRGameState->PlayerArray.Num(); i++)
+			{
+				ABRPlayerState* BRPS = Cast<ABRPlayerState>(BRGameState->PlayerArray[i]);
+				if (!BRPS || BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue;
+				int32 PartnerIndex = -1;
+				for (int32 j = 0; j < BRGameState->PlayerArray.Num(); j++)
+				{
+					if (i == j) continue;
+					ABRPlayerState* Other = Cast<ABRPlayerState>(BRGameState->PlayerArray[j]);
+					if (!Other || Other->TeamNumber != BRPS->TeamNumber) continue;
+					if (Other->bIsLowerBody != BRPS->bIsLowerBody) { PartnerIndex = j; break; }
+				}
+				BRPS->SetPlayerRole(BRPS->bIsLowerBody, PartnerIndex);
+			}
+			SortedByTeam.Empty();
+			for (APlayerState* PS : BRGameState->PlayerArray)
+			{
+				if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+				{
+					if (BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue;
+					SortedByTeam.Add(BRPS);
+				}
+			}
+			Algo::Sort(SortedByTeam, [](const ABRPlayerState* A, const ABRPlayerState* B)
+			{
+				if (A->TeamNumber != B->TeamNumber) return A->TeamNumber < B->TeamNumber;
+				return A->bIsLowerBody && !B->bIsLowerBody;
+			});
+			NumPlayersInTeams = SortedByTeam.Num();
+			NumTeams = NumPlayersInTeams / 2;
+		}
+	}
 	if (NumTeams < 1)
 	{
 		GI->ClearPendingApplyRandomTeamRoles();
@@ -462,13 +644,76 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 		return;
 	}
 
+	// [강화] 전체 하체 Pawn이 준비될 때까지 대기 (로딩 빠른 맵에서 상체가 하체로 남는 현상 방지). Controller도 이름 fallback으로 검색
+	auto FindControllerForPS = [World](ABRPlayerState* PS) -> APlayerController*
+	{
+		if (!PS) return nullptr;
+		APlayerController* PC = Cast<APlayerController>(PS->GetOwningController());
+		if (PC) return PC;
+		const FString TargetName = PS->GetPlayerName();
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* C = It->Get();
+			if (!C) continue;
+			if (C->GetPlayerState<APlayerState>() == PS) return C;
+			if (APlayerState* OtherPS = C->GetPlayerState<APlayerState>())
+			{
+				if (OtherPS->GetPlayerName() == TargetName) return C;
+			}
+		}
+		return nullptr;
+	};
+	constexpr int32 MaxAllLowerReadyRetries = 20;  // 최대 6초 대기 (0.3초 × 20)
+	for (int32 i = 0; i < NumTeams; i++)
+	{
+		ABRPlayerState* LowerPS = SortedByTeam.IsValidIndex(2 * i) ? SortedByTeam[2 * i] : nullptr;
+		if (!LowerPS || !LowerPS->bIsLowerBody) continue;
+		APlayerController* LowerPC = FindControllerForPS(LowerPS);
+		if (!LowerPC)
+		{
+			// 팀2 등 원격 플레이어 Controller가 아직 없으면 스킵하지 말고 대기 (그래야 이후 팀2 상체 스폰 가능)
+			if (StagedAllLowerReadyRetries < MaxAllLowerReadyRetries)
+			{
+				StagedAllLowerReadyRetries++;
+				PendingSortedByTeamSnapshot = SortedByTeam;
+				World->GetTimerManager().SetTimer(StagedAllLowerReadyHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.3f, false);
+				UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 전체 하체 Pawn 대기 중 — 팀 %d Controller 없음 (%d/%d), 0.3초 후 재시도"), i + 1, StagedAllLowerReadyRetries, MaxAllLowerReadyRetries);
+				return;
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 전체 하체 Pawn 대기 실패(팀 %d Controller 미등장), 팀 %d 스킵 가능"), i + 1, i + 1);
+			PendingSortedByTeamSnapshot.Empty();
+			break;
+		}
+		APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());
+		if (!LowerChar || !IsValid(LowerChar))
+		{
+			if (StagedAllLowerReadyRetries < MaxAllLowerReadyRetries)
+			{
+				StagedAllLowerReadyRetries++;
+				// 재진입 시 팀 수가 바뀌지 않도록 현재 SortedByTeam 스냅샷 저장 (재진입 시 일부가 TeamNumber 0으로 바뀌면 3명만 남아 하체3+상체1 발생)
+				PendingSortedByTeamSnapshot = SortedByTeam;
+				World->GetTimerManager().SetTimer(StagedAllLowerReadyHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.3f, false);
+				UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 전체 하체 Pawn 대기 중 (%d/%d), 0.3초 후 재시도 (팀 스냅샷 %d명 저장)"), StagedAllLowerReadyRetries, MaxAllLowerReadyRetries, PendingSortedByTeamSnapshot.Num());
+				return;
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 전체 하체 Pawn 대기 실패(재시도 %d회 초과), 팀 %d 스킵 가능"), MaxAllLowerReadyRetries, i + 1);
+			PendingSortedByTeamSnapshot.Empty();
+			break;
+		}
+	}
+	StagedAllLowerReadyRetries = 0;
+	PendingSortedByTeamSnapshot.Empty(); // 하체 대기 통과 또는 실패 후 스냅샷 해제
+
 	// 순차 스폰: 1팀 하체 확인 → 1팀 상체 스폰 → 2팀 하체 확인 → 2팀 상체 스폰 … (앞사람이 전부 정상 스폰된 뒤 다음으로 진행)
 	// 기존 순차 스폰 타이머가 있으면 취소
 	World->GetTimerManager().ClearTimer(StagedApplyTimerHandle);
+	World->GetTimerManager().ClearTimer(StagedAllLowerReadyHandle);
 	StagedSortedByTeam = SortedByTeam;
 	StagedNumTeams = NumTeams;
 	StagedCurrentTeamIndex = 0;
 	StagedPawnWaitRetriesForTeam = 0;
+	StagedControllerWaitRetriesForTeam = 0;
+	StagedUpperBodiesSpawnedCount = 0;
 	ApplyRoleChangesForRandomTeams_ApplyOneTeam();
 }
 
@@ -484,11 +729,15 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 			GI->ClearPendingApplyRandomTeamRoles();
 			GI->ClearPendingRoleRestoreData();
 		}
+		if (StagedUpperBodiesSpawnedCount == 0)
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료 but 상체 0명 스폰됨 (하체만 스폰된 상태일 수 있음)"));
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료 (고정 규칙: 하체 %d명, 상체 %d명 / 실제 상체 스폰 %d명)"), StagedNumTeams, StagedNumTeams, StagedUpperBodiesSpawnedCount);
 		StagedSortedByTeam.Empty();
 		StagedNumTeams = 0;
 		StagedCurrentTeamIndex = 0;
 		StagedPawnWaitRetriesForTeam = 0;
-		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료"));
+		StagedControllerWaitRetriesForTeam = 0;
+		StagedUpperBodiesSpawnedCount = 0;
 		return;
 	}
 
@@ -499,6 +748,7 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 	if (!LowerPS || !UpperPS)
 	{
 		StagedPawnWaitRetriesForTeam = 0;
+		StagedControllerWaitRetriesForTeam = 0;
 		StagedCurrentTeamIndex++;
 		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
 		return;
@@ -506,23 +756,61 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 
 	if (LowerPS->bIsLowerBody == false || UpperPS->bIsLowerBody == true)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 역할 불일치 - 스킵"), TeamIndex + 1);
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 역할 불일치 - 스킵 (하체=%s bIsLowerBody=%d, 상체=%s bIsLowerBody=%d)"),
+			TeamIndex + 1, *LowerPS->GetPlayerName(), LowerPS->bIsLowerBody ? 1 : 0, *UpperPS->GetPlayerName(), UpperPS->bIsLowerBody ? 1 : 0);
 		StagedPawnWaitRetriesForTeam = 0;
+		StagedControllerWaitRetriesForTeam = 0;
 		StagedCurrentTeamIndex++;
 		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
 		return;
 	}
 
-	APlayerController* LowerPC = Cast<APlayerController>(LowerPS->GetOwningController());
-	APlayerController* UpperPC = Cast<APlayerController>(UpperPS->GetOwningController());
+	// GetOwningController()·PlayerState 포인터가 Seamless Travel 직후 불일치할 수 있음 → World에서 PC 검색 (포인터 → 이름 매칭 fallback)
+	auto FindControllerForPlayerState = [World](ABRPlayerState* PS) -> APlayerController*
+	{
+		if (!PS) return nullptr;
+		APlayerController* PC = Cast<APlayerController>(PS->GetOwningController());
+		if (PC) return PC;
+		const FString TargetName = PS->GetPlayerName();
+		for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+		{
+			APlayerController* C = It->Get();
+			if (!C) continue;
+			if (C->GetPlayerState<APlayerState>() == PS)
+				return C;
+			// Seamless Travel 직후 서버에서 PC->PlayerState가 다른 객체를 가리킬 수 있음 → 이름으로 매칭
+			if (APlayerState* OtherPS = C->GetPlayerState<APlayerState>())
+			{
+				if (OtherPS->GetPlayerName() == TargetName)
+					return C;
+			}
+		}
+		return nullptr;
+	};
+	// 해당 팀의 Controller가 서버에 올 때까지 대기 (1팀 하체→상체 완료 후 2팀 진행하듯, 이 팀 준비될 때까지 기다린 뒤 스폰)
+	APlayerController* LowerPC = FindControllerForPlayerState(LowerPS);
+	APlayerController* UpperPC = FindControllerForPlayerState(UpperPS);
 	if (!LowerPC || !UpperPC)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d Controller 없음, 스킵"), TeamIndex + 1);
+		if (StagedControllerWaitRetriesForTeam < MaxStagedControllerWaitRetriesForTeam)
+		{
+			StagedControllerWaitRetriesForTeam++;
+			World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, 0.5f, false);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d Controller 대기 중 (%d/%d) — 서버에 생성되면 상체 스폰 (하체=%s 상체=%s)"),
+				TeamIndex + 1, StagedControllerWaitRetriesForTeam, MaxStagedControllerWaitRetriesForTeam,
+				LowerPC ? TEXT("O") : TEXT("X"), UpperPC ? TEXT("O") : TEXT("X"));
+			return;
+		}
+		// 20초 초과 시에만 스킵 (연결 끊김 등 예외)
+		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d Controller 대기 %d회 초과, 스킵 (하체=%s 상체=%s)"),
+			TeamIndex + 1, MaxStagedControllerWaitRetriesForTeam, LowerPC ? TEXT("O") : TEXT("X"), UpperPC ? TEXT("O") : TEXT("X"));
+		StagedControllerWaitRetriesForTeam = 0;
 		StagedPawnWaitRetriesForTeam = 0;
 		StagedCurrentTeamIndex++;
 		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
 		return;
 	}
+	StagedControllerWaitRetriesForTeam = 0;  // Controller 찾음 → 해당 팀 상체 스폰 진행
 
 	APlayerCharacter* LowerChar = Cast<APlayerCharacter>(LowerPC->GetPawn());
 	if (!LowerChar || !IsValid(LowerChar))
@@ -537,6 +825,7 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 		}
 		UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 팀 %d 하체 Pawn 없음(재시도 %d회 초과), 스킵"), TeamIndex + 1, MaxStagedPawnWaitRetriesPerTeam);
 		StagedPawnWaitRetriesForTeam = 0;
+		StagedControllerWaitRetriesForTeam = 0;
 		StagedCurrentTeamIndex++;
 		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
 		return;
@@ -580,12 +869,18 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 		NewUpper->ParentBodyCharacter = LowerChar;
 		LowerChar->SetUpperBodyPawn(NewUpper);
 		UpperPC->Possess(NewUpper);
+		StagedUpperBodiesSpawnedCount++;
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d: %s 상체 스폰 후 빙의 (순차 %d/%d)"), TeamIndex + 1, *UpperPS->GetPlayerName(), TeamIndex + 1, StagedNumTeams);
 	}
 
+	// 이전 팀(하체 확인 + 상체 스폰)이 완료된 뒤에만 다음 팀 진행. SpawnDelayBetweenTeams 동안 대기 후 다음 팀 처리.
 	StagedCurrentTeamIndex++;
 	if (StagedCurrentTeamIndex < StagedNumTeams)
-		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, FMath::Max(0.01f, SpawnDelayBetweenTeams), false);
+	{
+		const float Delay = FMath::Max(0.5f, SpawnDelayBetweenTeams);
+		World->GetTimerManager().SetTimer(StagedApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam, Delay, false);
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 팀 %d 상체 스폰 완료, %.2f초 후 팀 %d 진행"), TeamIndex + 1, Delay, StagedCurrentTeamIndex + 1);
+	}
 	else
 		ApplyRoleChangesForRandomTeams_ApplyOneTeam(); // 마지막 팀 처리 후 정리
 }
@@ -773,13 +1068,23 @@ void ABRGameMode::StartGame()
 					}
 				}
 			}
-			
+
 			World->ServerTravel(TravelURL, true);
 		}
 }
 
 void ABRGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 서버 안정성: 모든 타이머 해제로 장시간 구동 시 메모리/참조 누수 방지
+	UWorld* World = GetWorld();
+	if (World)
+	{
+		World->GetTimerManager().ClearTimer(InitialRoleApplyTimerHandle);
+		World->GetTimerManager().ClearTimer(StagedApplyTimerHandle);
+		World->GetTimerManager().ClearTimer(StagedAllLowerReadyHandle);
+		World->GetTimerManager().ClearTimer(DirectStartRoleApplyTimerHandle);
+	}
+
 	Super::EndPlay(EndPlayReason);
 	
 	// PIE 종료 시 NavigationSystem이 World를 참조하여 GC가 되지 않는 문제는
@@ -790,7 +1095,6 @@ void ABRGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	// World의 정리 순서에 문제가 있을 수 있습니다.
 	// 이 문제는 주로 비동기 네비게이션 메시 빌드가 진행 중일 때 발생합니다.
 	
-	UWorld* World = GetWorld();
 	if (World && World->IsPlayInEditor())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[GameMode] PIE 종료 - NavigationSystem은 World 파괴 시 자동으로 정리됩니다."));
@@ -804,40 +1108,74 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 
 	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 플레이어 사망 확인: %s"), *VictimCharacter->GetName());
 
-	ABRGameState* GS = GetGameState<ABRGameState>();
-	if (!GS) return;
-
 	// 캐릭터에서 PlayerController 및 PlayerState 가져오기
 	AController* Controller = VictimCharacter->GetController();
-	if (!Controller) return;
+	ABRPlayerState* PS = Controller ? Controller->GetPlayerState<ABRPlayerState>() : nullptr;
 
-	ABRPlayerState* PS = Controller->GetPlayerState<ABRPlayerState>();
-	if (!PS) return;
-
-	// 1) 사망한 플레이어 → Dead + 관전(PlayerIndex 0)
-	if (PS->CurrentStatus != EPlayerStatus::Dead)
+	if (PS)
 	{
-		PS->SetPlayerStatus(EPlayerStatus::Dead);
-	}
-	PS->SetSpectator(true);
-	UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 → 관전(PlayerIndex 0)으로 전환"),
-		*PS->GetPlayerName(), PS->TeamNumber);
-
-	// 2) 같은 팀 파트너(상체/하체)도 관전(PlayerIndex 0)으로 전환 (한 몸이므로 둘 다 탈락)
-	if (PS->ConnectedPlayerIndex >= 0 && GS->PlayerArray.IsValidIndex(PS->ConnectedPlayerIndex))
-	{
-		if (ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[PS->ConnectedPlayerIndex]))
+		// PlayerState에 사망 상태가 아직 반영 안 되었다면 여기서 확실히 처리
+		if (PS->CurrentStatus != EPlayerStatus::Dead)
 		{
-			if (PartnerPS->CurrentStatus != EPlayerStatus::Dead)
+			PS->SetPlayerStatus(EPlayerStatus::Dead);
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 처리 완료"),
+			*PS->GetPlayerName(), PS->TeamNumber);
+	}
+
+	// -----------------------------------------------------------
+	// [추가 기능] 2초 후 팀 전체 관전 모드 전환
+	// -----------------------------------------------------------
+	ABRPlayerController* VictimPC = Cast<ABRPlayerController>(Controller);
+	ABRPlayerController* PartnerPC = nullptr;
+
+	// 파트너 찾기 (TeamNumber 기준)
+	if (PS && GetGameState<ABRGameState>())
+	{
+		for (APlayerState* OtherPS : GetGameState<ABRGameState>()->PlayerArray)
+		{
+			ABRPlayerState* BRPS = Cast<ABRPlayerState>(OtherPS);
+			if (BRPS && BRPS != PS && BRPS->TeamNumber == PS->TeamNumber)
 			{
-				PartnerPS->SetPlayerStatus(EPlayerStatus::Spectating);
+				PartnerPC = Cast<ABRPlayerController>(BRPS->GetOwningController());
+
+				// 파트너도 사망 처리 (상태 동기화)
+				if (BRPS->CurrentStatus != EPlayerStatus::Dead)
+				{
+					BRPS->SetPlayerStatus(EPlayerStatus::Dead);
+				}
+				break;
 			}
-			PartnerPS->SetSpectator(true);
-			UE_LOG(LogTemp, Log, TEXT("[GameMode] 파트너 %s (Team %d) → 관전(PlayerIndex 0)으로 전환"),
-				*PartnerPS->GetPlayerName(), PartnerPS->TeamNumber);
 		}
 	}
 
-	// TODO: 여기에 남은 생존 팀 수를 확인하여 '게임 종료(우승)' 판정 로직 추가
-	// 예: CheckGameEndCondition();
+	// 타이머 설정 (2초 후 관전 전환)
+	// 피해자 혹은 파트너가 존재할 때만 타이머 실행
+	if (VictimPC || PartnerPC)
+	{
+		FTimerHandle SpecTimerHandle;
+		FTimerDelegate TimerDel;
+
+		// Weak Pointer로 변환하여 전달 (타이머 실행 시점에 객체 유효성 보장)
+		TWeakObjectPtr<ABRPlayerController> WeakVictimPC(VictimPC);
+		TWeakObjectPtr<ABRPlayerController> WeakPartnerPC(PartnerPC);
+
+		TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectator, WeakVictimPC, WeakPartnerPC);
+
+		GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle, TimerDel, 2.0f, false);
+	}
+}
+
+void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> VictimPC, TWeakObjectPtr<ABRPlayerController> PartnerPC)
+{
+	if (VictimPC.IsValid())
+	{
+		VictimPC->StartSpectatingMode();
+	}
+
+	if (PartnerPC.IsValid())
+	{
+		PartnerPC->StartSpectatingMode();
+	}
 }

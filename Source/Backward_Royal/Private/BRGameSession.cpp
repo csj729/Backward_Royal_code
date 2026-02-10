@@ -440,7 +440,7 @@ void ABRGameSession::FindSessionsInternal(bool bIsRetry)
 			NetMode == NM_ListenServer ? TEXT("ListenServer") :
 			NetMode == NM_Client ? TEXT("Client") : TEXT("Other"));
 	}
-	
+
 	// 이전 검색 취소
 	SessionInterface->CancelFindSessions();
 	

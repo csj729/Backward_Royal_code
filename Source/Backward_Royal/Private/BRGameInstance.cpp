@@ -574,19 +574,21 @@ void UBRGameInstance::SavePendingRolesForTravel(ABRGameState *GameState) {
   G_PendingRoleByIndex.Empty();
   for (APlayerState *PS : GameState->PlayerArray) {
     if (ABRPlayerState *BRPS = Cast<ABRPlayerState>(PS)) {
-      FString Key = BRPS->GetPlayerName();
-      if (Key.IsEmpty())
-        Key = BRPS->UserUID;
-      if (!Key.IsEmpty()) {
-        TTuple<int32, bool, int32> Data(BRPS->TeamNumber, BRPS->bIsLowerBody,
-                                        BRPS->ConnectedPlayerIndex);
-        PendingRoleRestoreByName.Add(Key, Data);
-        G_PendingRoleByName.Add(Key, Data);
+      TTuple<int32, bool, int32> Data(BRPS->TeamNumber, BRPS->bIsLowerBody,
+                                      BRPS->ConnectedPlayerIndex);
+      const FString LocalPlayerName = BRPS->GetPlayerName();
+      const FString LocalUserUID = BRPS->UserUID;
+      // Travel 후 복원 시 이름 복제가 늦을 수 있으므로, 이름과 UID 둘 다 키로 저장
+      if (!LocalPlayerName.IsEmpty()) {
+        PendingRoleRestoreByName.Add(LocalPlayerName, Data);
+        G_PendingRoleByName.Add(LocalPlayerName, Data);
       }
-      G_PendingRoleByIndex.Add(TTuple<int32, bool, int32>(
-          BRPS->TeamNumber, BRPS->bIsLowerBody, BRPS->ConnectedPlayerIndex));
-      PendingRoleRestoreByIndex.Add(TTuple<int32, bool, int32>(
-          BRPS->TeamNumber, BRPS->bIsLowerBody, BRPS->ConnectedPlayerIndex));
+      if (!LocalUserUID.IsEmpty() && LocalUserUID != LocalPlayerName) {
+        PendingRoleRestoreByName.Add(LocalUserUID, Data);
+        G_PendingRoleByName.Add(LocalUserUID, Data);
+      }
+      G_PendingRoleByIndex.Add(Data);
+      PendingRoleRestoreByIndex.Add(Data);
     }
   }
   UE_LOG(LogTemp, Warning,
@@ -628,6 +630,9 @@ void UBRGameInstance::RestorePendingRolesFromTravel(ABRGameState *GameState) {
         BRPS->SetTeamNumber(Found->Get<0>());
         BRPS->SetPlayerRole(Found->Get<1>(), Found->Get<2>());
         Restored++;
+        UE_LOG(LogTemp, Log, TEXT("[진단] 복원 매칭(이름/UID) 성공: Key='%s' -> 팀%d %s"), *Key, Found->Get<0>(), Found->Get<1>() ? TEXT("하체") : TEXT("상체"));
+      } else {
+        UE_LOG(LogTemp, Warning, TEXT("[진단] 복원 매칭 실패: GetPlayerName='%s' UserUID='%s' (NameMap %d개)"), *BRPS->GetPlayerName(), *BRPS->UserUID, NameMap.Num());
       }
     }
   }
@@ -1022,8 +1027,8 @@ void UBRGameInstance::DoPIEExitCleanup(UWorld *World) {
     if (ABRGameSession *GameSession =
             Cast<ABRGameSession>(GameMode->GameSession)) {
       GameSession->UnbindSessionDelegatesForPIEExit();
-      OnRoomTitleReceived.Clear();
     }
+    OnRoomTitleReceived.Clear();
   }
 
   // 2) GEngine/GameSession 델리게이트·위젯 정리 — PC가 월드를 잡지 않도록

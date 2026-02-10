@@ -8,8 +8,6 @@
 #include "BRPlayerState.h"
 #include "BRGameState.h"
 
-DEFINE_LOG_CATEGORY(LogSwitchOrb);
-
 ASwitchOrb::ASwitchOrb()
 {
     // 1. 충돌체 설정
@@ -40,16 +38,6 @@ void ASwitchOrb::OnOrbOverlap(UPrimitiveComponent* OverlappedComponent, AActor* 
     UPrimitiveComponent* OtherComp, int32 OtherBodyIndex,
     bool bFromSweep, const FHitResult& SweepResult)
 {
-    FString DebugMsg = FString::Printf(TEXT("Orb Touched by: %s (Authority: %s)"),
-        *GetNameSafe(OtherActor),
-        HasAuthority() ? TEXT("Server") : TEXT("Client"));
-
-    // Key: -1(새 줄), Time: 5초, Color: Red
-    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Red, DebugMsg);
-
-    // 로그도 남김
-    UE_LOG(LogSwitchOrb, Log, TEXT("%s"), *DebugMsg);
-
     // 1. 권한 및 대상 확인
     if (!HasAuthority())
     {
@@ -79,7 +67,6 @@ void ASwitchOrb::OnOrbOverlap(UPrimitiveComponent* OverlappedComponent, AActor* 
         }
         if (!MyPS || !PlayerChar)
         {
-            UE_LOG(LogSwitchOrb, Warning, TEXT("UpperBodyPawn 감지되었으나 유효한 컨트롤러/ParentBody 없음 (%s)"), *GetNameSafe(OtherActor));
             return;
         }
     }
@@ -111,30 +98,18 @@ void ASwitchOrb::OnOrbOverlap(UPrimitiveComponent* OverlappedComponent, AActor* 
 
     if (!PlayerChar || !MyPS)
     {
-        UE_LOG(LogSwitchOrb, Warning, TEXT("실패: 대상이 APlayerCharacter가 아님 (%s)"), *GetNameSafe(OtherActor));
         return;
     }
-
-    // [디버깅] 플레이어 상태 로깅
-    UE_LOG(LogSwitchOrb, Log, TEXT("플레이어 감지: %s (TeamID=%d, bIsLowerBody=%s, bIsSpectatorSlot=%s, ConnectedPlayerIndex=%d)"),
-        *MyPS->GetPlayerName(),
-        MyPS->TeamNumber,
-        MyPS->bIsLowerBody ? TEXT("true") : TEXT("false"),
-        MyPS->bIsSpectatorSlot ? TEXT("true") : TEXT("false"),
-        MyPS->ConnectedPlayerIndex);
 
     // 관전이거나 팀 없음(TeamID 0)이면 파트너 없음
     if (MyPS->bIsSpectatorSlot || MyPS->TeamNumber <= 0)
     {
-        UE_LOG(LogSwitchOrb, Error, TEXT("실패: 관전이거나 팀이 없음 (TeamID=%d, bIsSpectatorSlot=%s). 팀 배정이 되었나요?"),
-            MyPS->TeamNumber, MyPS->bIsSpectatorSlot ? TEXT("true") : TEXT("false"));
         return;
     }
 
     ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>();
     if (!GS)
     {
-        UE_LOG(LogSwitchOrb, Error, TEXT("실패: GameState가 없음"));
         return;
     }
 
@@ -160,7 +135,6 @@ void ASwitchOrb::OnOrbOverlap(UPrimitiveComponent* OverlappedComponent, AActor* 
 
     if (!PartnerPS || MyIndex == INDEX_NONE || PartnerIndex == INDEX_NONE)
     {
-        UE_LOG(LogSwitchOrb, Error, TEXT("실패: 같은 팀의 파트너(반대 역할)를 찾을 수 없음 (TeamID=%d)"), MyPS->TeamNumber);
         return;
     }
 
@@ -174,8 +148,6 @@ void ASwitchOrb::OnOrbOverlap(UPrimitiveComponent* OverlappedComponent, AActor* 
     // [Step 2] 실질적인 컨트롤러 스왑 및 부착 재설정 실행
     // 이 함수는 PlayerState에 새로 구현합니다.
     MyPS->SwapControlWithPartner();
-
-    ORB_LOG(Log, TEXT("Orb 조작: %s와 %s의 역할 및 제어권 스왑 실행"), *MyPS->GetPlayerName(), *PartnerPS->GetPlayerName());
 
     Destroy();
 }
