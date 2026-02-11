@@ -176,6 +176,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Customization")
 	void SubmitCustomizationToServer();
 
+	void SyncCustomizationToServer();
+
 	// 관전 모드로 전환 (서버에서 호출)
 	UFUNCTION(BlueprintCallable, Category = "Spectating")
 	void StartSpectatingMode();

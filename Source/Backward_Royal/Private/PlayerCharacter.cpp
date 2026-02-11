@@ -29,7 +29,7 @@ APlayerCharacter::APlayerCharacter()
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
 
-	//GetMesh()->SetOwnerNoSee(true);  < 몸 투명화
+	//GetMesh()->SetOwnerNoSee(true); // <- 몸 투명화
 	GetMesh()->bCastHiddenShadow = true;
 	GetMesh()->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
 
@@ -39,7 +39,7 @@ APlayerCharacter::APlayerCharacter()
 	{
 		if (Part)
 		{
-			//Part->SetOwnerNoSee(true);     <- 몸 투명화
+			//Part->SetOwnerNoSee(true);   //  <- 몸 투명화
 			Part->bCastHiddenShadow = true;
 
 			// A. [틱 순서 고정] 
@@ -98,7 +98,7 @@ APlayerCharacter::APlayerCharacter()
 
 void APlayerCharacter::BeginPlay()
 {
-	// GetMesh()->SetVisibility(false, false);  <- 몸 투명화
+	//GetMesh()->SetVisibility(false, false); //  <- 몸 투명화
 
 	if (StaminaComp)
 	{
@@ -125,9 +125,30 @@ void APlayerCharacter::BeginPlay()
 		}
 	}
 
-	if (GetPlayerState())
+	ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>();
+
+	if (BRPS)
 	{
+		// 2. 이미 PlayerState가 있다면 초기화 로직 실행
+		// (OnRep_PlayerState 내부에서 TryApplyCustomization 바인딩 및 호출을 수행하도록 구성했다면 이 함수 호출만으로 충분합니다)
 		OnRep_PlayerState();
+	}
+	else
+	{
+		// 3. PlayerState가 아직 없다면(클라이언트 로딩 지연 등), 0.5초 뒤 재시도
+		FTimerHandle RetryHandle;
+		GetWorld()->GetTimerManager().SetTimer(RetryHandle, [this]()
+			{
+				// 람다 내부에서 다시 확인
+				if (ABRPlayerState* RetryPS = GetPlayerState<ABRPlayerState>())
+				{
+					// 재시도 성공 시 초기화 실행
+					// OnRep_PlayerState를 수동으로 호출하여 바인딩/적용 로직을 수행
+					OnRep_PlayerState();
+
+					UE_LOG(LogTemp, Log, TEXT("[Character] BeginPlay: PlayerState 뒤늦게 로드됨 -> 초기화 수행"));
+				}
+			}, 0.5f, false);
 	}
 }
 
@@ -340,6 +361,7 @@ void APlayerCharacter::OnRep_PlayerState()
 	if (MyPS)
 	{
 		// 1-1. 내 커마 정보가 오면 알려줘
+		MyPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
 		MyPS->OnCustomizationDataChanged.AddDynamic(this, &APlayerCharacter::TryApplyCustomization);
 
 		// 1-2. 내 역할(상/하체)이나 파트너가 정해지면 알려줘
@@ -490,13 +512,11 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 
 void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)
 {
-	LOG_PLAYER(Log, TEXT("ApplyMeshFromID 시작 - Slot: %d, ID: %d"), (int32)Slot, MeshID);
-
 	// 1. GameInstance 가져오기
 	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
 	if (!GI)
 	{
-		LOG_PLAYER(Error, TEXT("GameInstance를 찾을 수 없습니다."));
+		// 에디터 등에서 PIE 시작 전이거나 엣지 케이스
 		return;
 	}
 

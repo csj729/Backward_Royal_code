@@ -42,13 +42,13 @@ struct BACKWARD_ROYAL_API FBRUserInfo
 	UPROPERTY(BlueprintReadWrite, Category = "User Info")
 	bool bIsReady;
 
-	// 관전 여부 (true = 관전 슬롯, PlayerIndex 0)
-	UPROPERTY(BlueprintReadWrite, Category = "User Info")
-	bool bIsSpectator;
-
-	// 하체 역할 여부 (true = 하체, false = 상체). 관전이면 무시
+	// 하체 역할 여부 (true = 하체, false = 상체)
 	UPROPERTY(BlueprintReadWrite, Category = "User Info")
 	bool bIsLowerBody;
+
+	// 관전자 여부
+	UPROPERTY(BlueprintReadWrite, Category = "User Info")
+	bool bIsSpectator;
 
 	// 연결된 플레이어 인덱스 (파트너, -1이면 없음)
 	UPROPERTY(BlueprintReadWrite, Category = "User Info")
@@ -62,8 +62,8 @@ struct BACKWARD_ROYAL_API FBRUserInfo
 		, CustomizationData()
 		, bIsHost(false)
 		, bIsReady(false)
-		, bIsSpectator(false)
 		, bIsLowerBody(true)
+		, bIsSpectator(false)
 		, ConnectedPlayerIndex(-1)
 	{
 	}
