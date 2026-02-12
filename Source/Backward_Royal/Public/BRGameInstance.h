@@ -225,10 +225,6 @@ protected:
 	/** 인덱스 폴백용 */
 	TArray<TTuple<int32, bool, int32>> PendingRoleRestoreByIndex;
 
-	// Key: 플레이어 인덱스 (int32), Value: 커스터마이징 데이터 (FBRCustomizationData)
-	UPROPERTY()
-	TMap<int32, FBRCustomizationData> PendingCustomizationByIndex;
-
 	/** PIE 종료 시 월드 GC 방해 방지: OnStart에서 설정한 타이머 핸들 (Shutdown에서 명시적으로 클리어) */
 	FTimerHandle ListenServerTimerHandle;
 	FTimerHandle SessionRecreateTimerHandle;

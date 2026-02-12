@@ -64,11 +64,6 @@ void AUpperBodyPawn::BeginPlay()
 		FrontCameraBoom->AddTickPrerequisiteActor(this);
 	}
 
-	if (AActor* ParentActor = GetAttachParentActor())
-	{
-		AddTickPrerequisiteActor(ParentActor);
-	}
-
 	// 입력 매핑 등록
 	if (APlayerController* PC = Cast<APlayerController>(Controller))
 	{
@@ -80,6 +75,28 @@ void AUpperBodyPawn::BeginPlay()
 			}
 		}
 	}
+
+	//if (GEngine)
+	//{
+	//	// 1. 현재 네트워크 상태 확인
+	//	FString NetRole = TEXT("None");
+	//	switch (GetLocalRole())
+	//	{
+	//	case ROLE_Authority: NetRole = TEXT("Authority (Server)"); break;
+	//	case ROLE_AutonomousProxy: NetRole = TEXT("AutonomousProxy (Client)"); break;
+	//	case ROLE_SimulatedProxy: NetRole = TEXT("SimulatedProxy (Other)"); break;
+	//	}
+
+	//	// 2. 소유자 및 컨트롤러 확인 (이제 안전함)
+	//	FString OwnerName = GetOwner() ? GetOwner()->GetName() : TEXT("No Owner");
+	//	FString ControllerName = GetController() ? GetController()->GetName() : TEXT("No Controller");
+
+	//	// 3. 화면 출력
+	//	FString DebugMsg = FString::Printf(TEXT("[%s] Pawn: %s | Owner: %s | Controller: %s"),
+	//		*NetRole, *GetName(), *OwnerName, *ControllerName);
+
+	//	GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Magenta, DebugMsg);
+	//}
 }
 
 void AUpperBodyPawn::Tick(float DeltaTime)
@@ -91,21 +108,16 @@ void AUpperBodyPawn::Tick(float DeltaTime)
 	{
 		ParentBodyCharacter = Cast<APlayerCharacter>(GetAttachParentActor());
 
-		if (ParentBodyCharacter)
+		if (ParentBodyCharacter && Controller)
 		{
-			// 늦게라도 부모를 찾았다면 틱 순서 동기화
-			AddTickPrerequisiteActor(ParentBodyCharacter);
+			float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
+			FRotator NewRotation = Controller->GetControlRotation();
 
-			// 초기화 시 컨트롤러 회전을 등 뒤(180도)로 강제 정렬하여 스왑 직후 꼬임 방지
-			if (Controller)
-			{
-				float CurrentBodyYaw = ParentBodyCharacter->GetActorRotation().Yaw;
-				FRotator NewRotation = Controller->GetControlRotation();
-				NewRotation.Yaw = CurrentBodyYaw + 180.0f;
-				NewRotation.Pitch = 0.0f; // 피치 초기화
-				Controller->SetControlRotation(NewRotation);
-				LastBodyYaw = CurrentBodyYaw;
-			}
+			// [초기화] 등 뒤(180도)를 바라보도록 설정
+			NewRotation.Yaw = CurrentBodyYaw + 180.0f;
+
+			Controller->SetControlRotation(NewRotation);
+			LastBodyYaw = CurrentBodyYaw;
 		}
 	}
 

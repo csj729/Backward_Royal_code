@@ -53,10 +53,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session", meta = (DisplayName = "Get Session Current Players"))
 	int32 GetSessionCurrentPlayers(int32 SessionIndex) const;
 
-	/** 호스트 전용: 세션 광고에 표시되는 현재 인원을 갱신합니다. PostLogin/Logout 후 서버에서 호출 */
-	UFUNCTION(BlueprintCallable, Category = "Session")
-	void UpdateSessionPlayerCount(int32 CurrentCount);
-
 	// 세션이 생성되어 있는지 확인 (블루프린트에서 사용 가능)
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	bool HasActiveSession() const;
@@ -67,6 +63,9 @@ public:
 
 	/** PIE 종료 시 GameInstance::Shutdown에서 호출. SessionInterface 델리게이트 및 PendingRoom 타이머를 먼저 해제해 월드 참조 사슬을 끊음 */
 	void UnbindSessionDelegatesForPIEExit();
+
+	/** 방 찾기 리스트에 표시되는 현재 인원 갱신 (호스트 세션만). 플레이어 입장/퇴장 시 GameMode에서 호출 */
+	void UpdateSessionPlayerCount(int32 PlayerCount);
 
 	// 방 생성 완료 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")

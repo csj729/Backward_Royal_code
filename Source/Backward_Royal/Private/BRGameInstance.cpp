@@ -572,10 +572,6 @@ void UBRGameInstance::SavePendingRolesForTravel(ABRGameState *GameState) {
   PendingRoleRestoreByIndex.Empty();
   G_PendingRoleByName.Empty();
   G_PendingRoleByIndex.Empty();
-
-  PendingCustomizationByIndex.Empty();
-
-  int32 Index = 0; // 인덱스 카운터
   for (APlayerState *PS : GameState->PlayerArray) {
     if (ABRPlayerState *BRPS = Cast<ABRPlayerState>(PS)) {
       TTuple<int32, bool, int32> Data(BRPS->TeamNumber, BRPS->bIsLowerBody,
@@ -591,12 +587,8 @@ void UBRGameInstance::SavePendingRolesForTravel(ABRGameState *GameState) {
         PendingRoleRestoreByName.Add(LocalUserUID, Data);
         G_PendingRoleByName.Add(LocalUserUID, Data);
       }
-
-      PendingCustomizationByIndex.Add(Index, BRPS->CustomizationData);
       G_PendingRoleByIndex.Add(Data);
       PendingRoleRestoreByIndex.Add(Data);
-
-      Index++;
     }
   }
   UE_LOG(LogTemp, Warning,
@@ -709,19 +701,6 @@ void UBRGameInstance::RestoreUserInfoToPlayerStateForPostLogin(
   const TTuple<int32, bool, int32> &Data = Arr[Index];
   BRPS->SetTeamNumber(Data.Get<0>());
   BRPS->SetPlayerRole(Data.Get<1>(), Data.Get<2>());
-
-  // 커스터마이징 데이터 복구
-  if (PendingCustomizationByIndex.Contains(Index)) {
-      FBRCustomizationData SavedCustomization = PendingCustomizationByIndex[Index];
-
-      // 서버 측 변수 직접 업데이트 (Replication 트리거)
-      BRPS->CustomizationData = SavedCustomization;
-
-      // 서버에서도 적용 로직 실행 (필요한 경우)
-      BRPS->OnRep_CustomizationData();
-
-      UE_LOG(LogBRGameInstance, Log, TEXT("[RestoreUserInfo] PlayerIndex(%d) 커스터마이징 복구 완료"), Index);
-  }
 }
 
 /** [핵심] JSON 데이터를 읽어 DT를 갱신하고 에셋으로 저장함 */
@@ -1179,7 +1158,6 @@ void UBRGameInstance::LoadPlayerNameFromUserInfo() {
 void UBRGameInstance::SaveCustomization(const FBRCustomizationData &NewData)
 {
     LocalCustomizationData = NewData;
-    LocalCustomizationData.bIsDataValid = true;
 
     UE_LOG(LogBRGameInstance, Log,
             TEXT("Local Customization Saved: Head(%d), Leg(%d)"), NewData.HeadID,

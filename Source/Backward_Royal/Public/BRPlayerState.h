@@ -128,7 +128,7 @@ public:
 	EPlayerStatus CurrentStatus = EPlayerStatus::Alive;
 
 	UFUNCTION()
-	void OnRep_PlayerStatus();	
+	void OnRep_PlayerStatus();
 
 	UFUNCTION()
 	void OnRep_PartnerPlayerState();
@@ -173,4 +173,3 @@ protected:
 
 	virtual void CopyProperties(APlayerState* PlayerState) override;
 };
-

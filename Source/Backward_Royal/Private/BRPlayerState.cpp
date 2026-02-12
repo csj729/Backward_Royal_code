@@ -1,5 +1,4 @@
-// Source/Backward_Royal/Private/BRPlayerState.cpp
-
+// BRPlayerState.cpp
 #include "BRPlayerState.h"
 #include "BRGameState.h"
 #include "BRPlayerController.h"
@@ -15,10 +14,10 @@ ABRPlayerState::ABRPlayerState()
 	TeamNumber = 0;
 	bIsHost = false;
 	bIsReady = false;
-	bIsSpectatorSlot = false;
+	bIsSpectatorSlot = false;	
 	bIsLowerBody = true; // 기본값은 하체
 	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
-	PartnerPlayerState = nullptr; // [신규] 포인터 초기화
+	PartnerPlayerState = nullptr;
 	UserUID = TEXT("");
 }
 
@@ -31,8 +30,8 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, bIsReady);
 	DOREPLIFETIME(ABRPlayerState, bIsSpectatorSlot);
 	DOREPLIFETIME(ABRPlayerState, bIsLowerBody);
-	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex); // [호환성] 인덱스 유지
-	DOREPLIFETIME(ABRPlayerState, PartnerPlayerState);   // [핵심] 파트너 포인터 복제
+	DOREPLIFETIME(ABRPlayerState, ConnectedPlayerIndex);
+	DOREPLIFETIME(ABRPlayerState, PartnerPlayerState);
 	DOREPLIFETIME(ABRPlayerState, UserUID);
 	DOREPLIFETIME(ABRPlayerState, CustomizationData);
 	DOREPLIFETIME(ABRPlayerState, CurrentStatus);
@@ -47,7 +46,8 @@ void ABRPlayerState::ServerSetCustomizationData_Implementation(const FBRCustomiz
 
 void ABRPlayerState::OnRep_CustomizationData()
 {
-	// 데이터가 갱신되었음을 알림
+	// 데이터가 갱신되었음을 캐릭터에게 알리거나, 캐릭터가 이를 감지하여 외형 갱신
+	// 예: Cast<APlayerCharacter>(GetPawn())->UpdateAppearance();
 	if (OnCustomizationDataChanged.IsBound())
 	{
 		OnCustomizationDataChanged.Broadcast();
@@ -139,66 +139,60 @@ void ABRPlayerState::OnRep_IsReady()
 	// UI 업데이트를 위한 이벤트 발생 가능
 }
 
-// [수정] 인덱스 기반 역할 설정 -> 포인터 버전으로 위임
 void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
-{
-	if (HasAuthority())
-	{
-		ABRPlayerState* FoundPartner = nullptr;
-		if (ConnectedIndex >= 0)
-		{
-			if (AGameStateBase* GS = GetWorld()->GetGameState())
-			{
-				if (GS->PlayerArray.IsValidIndex(ConnectedIndex))
-				{
-					FoundPartner = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedIndex]);
-				}
-			}
-		}
-
-		// 실제 로직은 포인터 기반 함수에서 처리
-		SetPlayerRole(bLowerBody, FoundPartner);
-	}
-}
-
-// [신규] 포인터 기반 역할 설정 (메인 로직)
-void ABRPlayerState::SetPlayerRole(bool bLowerBody, ABRPlayerState* NewPartner)
 {
 	if (HasAuthority())
 	{
 		bIsSpectatorSlot = false;
 		bIsLowerBody = bLowerBody;
-
-		// 1. 포인터 설정 (핵심)
-		SetPartner(NewPartner);
-
-		// 2. 인덱스 자동 갱신 (호환성 유지)
-		if (NewPartner)
+		ConnectedPlayerIndex = ConnectedIndex;
+		PartnerPlayerState = nullptr;
+		if (ConnectedIndex >= 0 && GetWorld())
 		{
-			if (AGameStateBase* GS = GetWorld()->GetGameState())
+			if (ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>())
 			{
-				ConnectedPlayerIndex = GS->PlayerArray.Find(NewPartner);
+				if (GS->PlayerArray.IsValidIndex(ConnectedIndex))
+				{
+					PartnerPlayerState = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedIndex]);
+					// 상대편에도 나를 파트너로 설정 (양방향 참조)
+					if (PartnerPlayerState)
+					{
+						PartnerPlayerState->PartnerPlayerState = this;
+					}
+				}
 			}
 		}
-		else
-		{
-			ConnectedPlayerIndex = -1;
-		}
-
 		FString PlayerName = GetPlayerName();
-		if (PlayerName.IsEmpty()) PlayerName = TEXT("Unknown Player");
+		if (PlayerName.IsEmpty())
+		{
+			PlayerName = TEXT("Unknown Player");
+		}
 		FString RoleName = bLowerBody ? TEXT("하체") : TEXT("상체");
-		FString PartnerName = NewPartner ? NewPartner->GetPlayerName() : TEXT("None");
-
-		UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: %s 역할 할당 (파트너: %s, 인덱스: %d)"),
-			*PlayerName, *RoleName, *PartnerName, ConnectedPlayerIndex);
-
+		UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: %s 역할 할당 (연결된 플레이어 인덱스: %d)"),
+			*PlayerName, *RoleName, ConnectedIndex);
 		OnRep_PlayerRole();
 		NotifyUserInfoChanged();
 	}
 }
 
-// [신규] 파트너 직접 설정
+void ABRPlayerState::SetSpectator(bool bSpectator)
+{
+	if (HasAuthority())
+	{
+		bIsSpectatorSlot = bSpectator;
+		if (bSpectator)
+		{
+			ConnectedPlayerIndex = -1;
+			PartnerPlayerState = nullptr;
+			FString PlayerName = GetPlayerName();
+			if (PlayerName.IsEmpty()) PlayerName = TEXT("Unknown Player");
+			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 관전(PlayerIndex 0)으로 설정"), *PlayerName);
+		}
+		OnRep_PlayerRole();
+		NotifyUserInfoChanged();
+	}
+}
+
 void ABRPlayerState::SetPartner(ABRPlayerState* NewPartner)
 {
 	if (HasAuthority())
@@ -208,7 +202,12 @@ void ABRPlayerState::SetPartner(ABRPlayerState* NewPartner)
 	}
 }
 
-// [신규] 파트너 정보 수신 시 호출
+void ABRPlayerState::OnRep_PlayerRole()
+{
+	// UI 업데이트를 위한 이벤트 발생 가능
+}
+
+// 파트너 정보 수신 시 호출
 void ABRPlayerState::OnRep_PartnerPlayerState()
 {
 	// 캐릭터에게 파트너 정보가 갱신되었음을 알림 (커스터마이징 적용 트리거)
@@ -221,149 +220,82 @@ void ABRPlayerState::OnRep_PartnerPlayerState()
 	}
 }
 
-void ABRPlayerState::SetSpectator(bool bSpectator)
-{
-	if (HasAuthority())
-	{
-		bIsSpectatorSlot = bSpectator;
-		if (bSpectator)
-		{
-			SetPartner(nullptr); // 파트너 없음
-			ConnectedPlayerIndex = -1;
-			FString PlayerName = GetPlayerName();
-			if (PlayerName.IsEmpty()) PlayerName = TEXT("Unknown Player");
-			UE_LOG(LogTemp, Log, TEXT("[플레이어 역할] %s: 관전(PlayerIndex 0)으로 설정"), *PlayerName);
-		}
-		OnRep_PlayerRole();
-		NotifyUserInfoChanged();
-	}
-}
-
-void ABRPlayerState::OnRep_PlayerRole()
-{
-	// UI 업데이트를 위한 이벤트 발생 가능
-}
-
-// [수정] 스왑 로직 (PartnerPlayerState 우선 사용)
 void ABRPlayerState::SwapControlWithPartner()
 {
-	// 1. 서버 권한 확인
 	if (!HasAuthority()) return;
 
 	ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>();
-	// ConnectedPlayerIndex 유효성 체크
 	if (!GS || !GS->PlayerArray.IsValidIndex(ConnectedPlayerIndex)) return;
 
-	// 파트너와 내 컨트롤러 가져오기
 	ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[ConnectedPlayerIndex]);
 	ABRPlayerController* MyPC = Cast<ABRPlayerController>(GetOwningController());
-	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS ? PartnerPS->GetOwningController() : nullptr);
+	ABRPlayerController* PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwningController());
 
 	if (MyPC && PartnerPC)
 	{
-		// [1] 스왑 전, 현재 각자가 조종 중인 Pawn 백업
+		// 1. 현재 각자가 조종 중인 Pawn을 명확히 백업
 		APawn* MyOldPawn = MyPC->GetPawn();
 		APawn* PartnerOldPawn = PartnerPC->GetPawn();
 
 		if (!MyOldPawn || !PartnerOldPawn) return;
 
-		// [2] 빙의 해제 (UnPossess)
+		// 2. 빙의 해제 및 교차 빙의
 		MyPC->UnPossess();
 		PartnerPC->UnPossess();
 
-		// [3] 교차 빙의 (Possess)
-		// 주의: MyOldPawn은 내가 조종하던 것이므로, 이제 파트너가 조종해야 함
 		MyPC->Possess(PartnerOldPawn);
 		PartnerPC->Possess(MyOldPawn);
 
-		// [4] 네트워크 소유권 갱신 (AutonomousProxy 권한 확정)
-		// Possess 내부에서 SetOwner를 하긴 하지만, 멀티플레이어 환경에서 확실한 동기화를 위해 명시
+		// 3. [핵심] 네트워크 소유권 갱신 (AutonomousProxy 권한 확정)
 		PartnerOldPawn->SetOwner(MyPC);
 		MyOldPawn->SetOwner(PartnerPC);
 
-		// [5] 상체/하체 부착 관계 재설정
-		// bIsLowerBody는 이미 SwitchOrb에서 반전된 상태임 (현재 나의 역할)
-
-		// 내가 하체라면 -> 파트너가 타던거(PartnerOldPawn)가 하체 캐릭터, 내가 타던거(MyOldPawn)가 상체
-		APlayerCharacter* LowerChar = nullptr;
-		AUpperBodyPawn* UpperPawn = nullptr;
-
-		if (bIsLowerBody)
-		{
-			LowerChar = Cast<APlayerCharacter>(PartnerOldPawn); // 내가 새로 탄 게 탱크
-			UpperPawn = Cast<AUpperBodyPawn>(MyOldPawn);       // 내가 내린 게 포탑
-		}
-		else
-		{
-			LowerChar = Cast<APlayerCharacter>(MyOldPawn);      // 내가 내린 게 탱크
-			UpperPawn = Cast<AUpperBodyPawn>(PartnerOldPawn);   // 내가 새로 탄 게 포탑
-		}
+		// 4. 상체 부착 상태 재설정
+		APlayerCharacter* LowerChar = bIsLowerBody ? Cast<APlayerCharacter>(PartnerOldPawn) : Cast<APlayerCharacter>(MyOldPawn);
+		AUpperBodyPawn* UpperPawn = bIsLowerBody ? Cast<AUpperBodyPawn>(MyOldPawn) : Cast<AUpperBodyPawn>(PartnerOldPawn);
 
 		if (UpperPawn && LowerChar)
 		{
-			// 상체를 하체에 다시 부착 (소유권 변경 후 재부착해야 깔끔함)
 			UpperPawn->AttachToComponent(LowerChar->HeadMountPoint, FAttachmentTransformRules::SnapToTargetNotIncludingScale);
 		}
 
-		// [6] 클라이언트 입력 시스템 재시작 (RPC)
-		// 클라이언트의 PlayerController가 새 Pawn에 대해 SetupInputComponent를 호출하게 함
-		MyPC->ClientRestart(MyPC->GetPawn());
-		PartnerPC->ClientRestart(PartnerPC->GetPawn());
+		// 5. [가장 중요] 클라이언트에게 입력 시스템 재시작 명령
+		// 이 함수가 호출되어야 클라이언트에서 하체의 SetupPlayerInputComponent가 다시 실행됩니다.
+		MyPC->ClientRestart(PartnerOldPawn);
+		PartnerPC->ClientRestart(MyOldPawn);
 
-		// [7] 역할별 설정 적용 람다 (회전값 초기화 로직 추가됨)
-		auto ApplyRoleSettings = [](ABRPlayerController* PC, bool bIsLower, APawn* ControlledPawn)
+		// 6. 설정 적용 람다 실행
+		auto ApplyRoleSettings = [this](ABRPlayerController* PC, bool bIsLower)
 			{
-				if (!PC || !ControlledPawn) return;
-
-				// 1. 입력 매핑 컨텍스트 변경
+				if (!PC) return;
 				PC->SetupRoleInput(bIsLower);
 
-				// 2. 시점 타겟 확실하게 설정
-				PC->SetViewTarget(ControlledPawn);
+				APawn* P = PC->GetPawn();
+				if (!P) return;
 
-				// 3. 입력 무시 상태 해제
+				// 시점 전환 (스크린샷 3번의 시점 고립 해결)
+				PC->SetViewTarget(P);
+
+				// 모든 입력 무시 상태 강제 해제
 				PC->ResetIgnoreMoveInput();
 				PC->SetIgnoreMoveInput(false);
 				PC->ResetIgnoreLookInput();
 				PC->SetIgnoreLookInput(false);
 
-				// 4. [중요 수정] 회전값(Control Rotation) 초기화
-				// 스왑 직후 카메라가 엉뚱한 곳을 보거나 꼬이는 현상 방지
 				if (bIsLower)
 				{
-					// 하체(탱크)를 맡은 사람은 탱크의 진행 방향을 바라보게 함
-					PC->SetControlRotation(ControlledPawn->GetActorRotation());
-
-					// 이동 모드 걷기로 초기화
-					if (ACharacter* Char = Cast<ACharacter>(ControlledPawn))
+					if (ACharacter* Character = Cast<ACharacter>(P))
 					{
-						Char->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
-					}
-				}
-				else
-				{
-					// 상체(포탑)를 맡은 사람은 탱크의 등 뒤(180도)를 바라보게 함
-					// (UpperBodyPawn은 하체에 붙어있으므로 부모의 회전을 가져옴)
-					if (AActor* Parent = ControlledPawn->GetAttachParentActor())
-					{
-						FRotator NewRot = Parent->GetActorRotation();
-						NewRot.Yaw += 180.0f; // 탱크 정면 기준 뒤쪽
-						NewRot.Pitch = 0.0f;
-						PC->SetControlRotation(NewRot);
+						Character->GetCharacterMovement()->SetMovementMode(MOVE_Walking);
 					}
 				}
 			};
 
-		// 람다 호출
-		ApplyRoleSettings(MyPC, bIsLowerBody, MyPC->GetPawn());
-		ApplyRoleSettings(PartnerPC, PartnerPS->bIsLowerBody, PartnerPC->GetPawn());
+		ApplyRoleSettings(MyPC, bIsLowerBody);
+		ApplyRoleSettings(PartnerPC, PartnerPS->bIsLowerBody);
 
-		// [8] UI/애니메이션 연출
 		ClientShowSwapAnim();
-		if (PartnerPS)
-		{
-			PartnerPS->ClientShowSwapAnim();
-		}
+		PartnerPS->ClientShowSwapAnim();
 	}
 }
 
@@ -385,13 +317,14 @@ FBRUserInfo ABRPlayerState::GetUserInfo() const
 	TempInfo.bIsReady = bIsReady;
 	TempInfo.bIsSpectator = bIsSpectatorSlot;
 	TempInfo.bIsLowerBody = bIsLowerBody;
-	TempInfo.ConnectedPlayerIndex = ConnectedPlayerIndex; // 인덱스 유지
+	TempInfo.ConnectedPlayerIndex = ConnectedPlayerIndex;
 	TempInfo.PlayerIndex = bIsSpectatorSlot ? 0 : (bIsLowerBody ? 1 : 2);
 
-	// 3. 커스터마이징 데이터 취합
+	// 3. 커스터마이징 데이터 취합 (중요!)
+	// 클래스 멤버인 CustomizationData를 구조체 필드에 할당
 	TempInfo.CustomizationData = CustomizationData;
 
-	// 4. 로그
+	// 4. [규칙 준수] 커스텀 로그 매크로 사용
 	if (TempInfo.PlayerName.IsEmpty() || TempInfo.PlayerName == TempInfo.UserUID)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("GetUserInfo | 이름이 비어있거나 UID와 동일함 (Name: %s, UID: %s)"),
@@ -480,7 +413,7 @@ void ABRPlayerState::CopyProperties(APlayerState* PlayerState)
 		NewBRPlayerState->UserUID = UserUID;                     // UID 유지
 		NewBRPlayerState->ConnectedPlayerIndex = ConnectedPlayerIndex; // 연결 인덱스 유지
 
-		// [추가] 파트너 포인터 복사
+		// 파트너 포인터 복사
 		NewBRPlayerState->PartnerPlayerState = PartnerPlayerState;
 
 		UE_LOG(LogTemp, Log, TEXT("[CopyProperties] %s의 데이터가 다음 레벨로 복사되었습니다."), *GetPlayerName());

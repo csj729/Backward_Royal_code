@@ -85,9 +85,6 @@ void UBR_SelectTeamWidget::RequestAssignToTeamSlot2P()
 
 void UBR_SelectTeamWidget::ScheduleSlotDisplayRefresh()
 {
-	// 즉시 한 번 갱신 (서버/호스트는 이미 반영된 상태에서 UI 갱신, 두 번째부터 이름 안 나오는 현상 완화)
-	UpdateSlotDisplay();
-
 	UWorld* World = GetWorld();
 	if (!World) return;
 	TWeakObjectPtr<UBR_SelectTeamWidget> WeakThis(this);
@@ -107,24 +104,26 @@ void UBR_SelectTeamWidget::UpdateSlotDisplay_Implementation()
 
 	const int32 TeamIndex0 = GetTeamIndex0Based(TeamIndex);
 	const int32 TeamID = GetTeamID(TeamIndex);
+
 	// SlotIndex 0=관전, 1=하체, 2=상체
+	// LobbyTeamSlots 기반 정보 (서버에서 관리되는 중앙 인덱스 정보)
 	FBRUserInfo Info0 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 0);
 	FBRUserInfo Info1 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 1);
 	FBRUserInfo Info2 = GS->GetLobbyTeamSlotInfo(TeamIndex0, 2);
+
+	// 만약 위에서 정보를 찾지 못했다면(예: 대기열에서 막 이동한 직후 복제 지연), 
+	// 각 PlayerState의 TeamNumber/Role 정보를 직접 조회하는 폴백 사용
 	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info0).IsEmpty())
 		Info0 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 0);
 	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info1).IsEmpty())
 		Info1 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 1);
 	if (UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info2).IsEmpty())
 		Info2 = GS->GetLobbyTeamSlotInfoByTeamIDAndPlayerIndex(TeamID, 2);
-	FString Display0 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info0);
-	FString Display1 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info1);
-	FString Display2 = UBRWidgetFunctionLibrary::GetDisplayNameForLobby(Info2);
 
 	if (PlayerNameSlot0)
-		PlayerNameSlot0->SetText(Display0.IsEmpty() ? FText::FromString(TEXT("관전")) : FText::FromString(Display0));
+		PlayerNameSlot0->SetText(FText::FromString(UBRWidgetFunctionLibrary::GetDisplayNameForLobbySlot(Info0, 0)));
 	if (PlayerNameSlot1)
-		PlayerNameSlot1->SetText(Display1.IsEmpty() ? FText::FromString(TEXT("1Player")) : FText::FromString(Display1));
+		PlayerNameSlot1->SetText(FText::FromString(UBRWidgetFunctionLibrary::GetDisplayNameForLobbySlot(Info1, 1)));
 	if (PlayerNameSlot2)
-		PlayerNameSlot2->SetText(Display2.IsEmpty() ? FText::FromString(TEXT("2Player")) : FText::FromString(Display2));
+		PlayerNameSlot2->SetText(FText::FromString(UBRWidgetFunctionLibrary::GetDisplayNameForLobbySlot(Info2, 2)));
 }
