@@ -85,6 +85,9 @@ void UBR_SelectTeamWidget::RequestAssignToTeamSlot2P()
 
 void UBR_SelectTeamWidget::ScheduleSlotDisplayRefresh()
 {
+	// 즉시 한 번 갱신 (서버/호스트는 이미 반영된 상태에서 UI 갱신, 두 번째부터 이름 안 나오는 현상 완화)
+	UpdateSlotDisplay();
+
 	UWorld* World = GetWorld();
 	if (!World) return;
 	TWeakObjectPtr<UBR_SelectTeamWidget> WeakThis(this);

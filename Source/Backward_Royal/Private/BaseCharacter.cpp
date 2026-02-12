@@ -1,4 +1,4 @@
-﻿// BaseCharacter.cpp
+// BaseCharacter.cpp
 #include "BaseCharacter.h"
 #include "BaseWeapon.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -83,6 +83,8 @@ void ABaseCharacter::BeginPlay()
     {
         DefaultWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
     }
+
+    UpdateHPUI();
 }
 
 void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
@@ -414,8 +416,11 @@ void ABaseCharacter::OnRep_CurrentHP()
 
     if (CurrentHP <= 0.0f)
     {
-        // 사망 처리 등 클라이언트 측 가시적 효과가 필요하다면 여기서 호출 가능
-        // Die(); 
+        // 클라이언트: 서버는 Die()에서 이미 처리함. 클라이언트는 랙돌 등 시각만 적용
+        if (!HasAuthority())
+        {
+            PerformDeathVisuals();
+        }
     }
 
     CHAR_LOG(Log, TEXT("HP가 복제되었습니다. 현재 HP: %.1f"), CurrentHP);

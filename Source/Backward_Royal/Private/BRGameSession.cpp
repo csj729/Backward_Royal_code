@@ -371,6 +371,8 @@ void ABRGameSession::CreateRoomSession(const FString& RoomName)
 	// 세션 이름 설정
 	FString SessionNameStr = RoomName.IsEmpty() ? TEXT("이름 없는 방") : RoomName;
 	SessionSettings->Set(FName(TEXT("SESSION_NAME")), SessionNameStr, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	// 방 찾기 리스트에 현재 인원 표시용 (OSS가 NumOpenPublicConnections를 갱신하지 않는 경우 대비)
+	SessionSettings->Set(FName(TEXT("CURRENT_PLAYER_COUNT")), 1, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	
 	// NGDA 스타일: CreateSession 호출 (NetMode 체크 없음 - Steam OSS가 자동으로 ListenServer 처리)
 	int32 LocalUserNum = 0;
@@ -753,9 +755,33 @@ int32 ABRGameSession::GetSessionCurrentPlayers(int32 SessionIndex) const
 		return 0;
 	}
 	const FOnlineSessionSearchResult& Result = SessionSearch->SearchResults[SessionIndex];
+	// OSS가 NumOpenPublicConnections를 갱신하지 않을 수 있으므로, 세션 설정에 저장한 현재 인원 우선 사용
+	int32 FromSettings = 0;
+	if (Result.Session.SessionSettings.Get(FName(TEXT("CURRENT_PLAYER_COUNT")), FromSettings) && FromSettings >= 0)
+	{
+		int32 Max = Result.Session.SessionSettings.NumPublicConnections;
+		return FMath::Clamp(FromSettings, 0, Max);
+	}
 	int32 Max = Result.Session.SessionSettings.NumPublicConnections;
 	int32 Open = Result.Session.NumOpenPublicConnections;
 	return FMath::Max(0, Max - Open);
+}
+
+void ABRGameSession::UpdateSessionPlayerCount(int32 CurrentCount)
+{
+	if (!SessionInterface.IsValid() || !SessionSettings.IsValid())
+	{
+		return;
+	}
+	if (SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
+	{
+		return;
+	}
+	int32 MaxConnections = SessionSettings->NumPublicConnections;
+	int32 Clamped = FMath::Clamp(CurrentCount, 0, MaxConnections);
+	SessionSettings->Set(FName(TEXT("CURRENT_PLAYER_COUNT")), Clamped, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	SessionInterface->UpdateSession(NAME_GameSession, *SessionSettings, true);
+	UE_LOG(LogTemp, Log, TEXT("[세션] 현재 인원 광고 갱신: %d/%d"), Clamped, MaxConnections);
 }
 
 bool ABRGameSession::HasActiveSession() const

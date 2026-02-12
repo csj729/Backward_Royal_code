@@ -77,8 +77,24 @@ public:
 	// 플레이어 사망 시 호출되는 함수
 	void OnPlayerDied(class ABaseCharacter* VictimCharacter);
 
-	// 2초 후 팀 전체를 관전 모드로 전환하는 함수
+	/** 생존 팀이 1개일 때 승리 처리. SwitchTeamToSpectatorByPlayerIndices에서 호출 */
+	void CheckAndEndGameIfWinner();
+
+	// 2초 후 팀 전체를 관전 모드로 전환 (WeakPtr 버전, 레거시)
 	void SwitchTeamToSpectator(TWeakObjectPtr<class ABRPlayerController> VictimPC, TWeakObjectPtr<class ABRPlayerController> PartnerPC);
+
+	/** 사망 팀 관전 전환 — PlayerArray 인덱스로 호출 (타이머 콜백용, 인덱스로 컨트롤러 재조회) */
+	void SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, int32 PartnerPlayerIndex);
+
+	/** 탈락한 팀 번호 기준으로 해당 팀 전원(하체+상체) 관전 전환 */
+	void SwitchEliminatedTeamToSpectator(int32 EliminatedTeamNumber);
+
+	/** 로비 맵으로 모든 플레이어 이동 (승리 시 WBP_LobbyMenu/WBP_Entry 표시) */
+	void TravelToLobby();
+
+	/** 승리 후 로비 이동 전 대기 시간(초). 0이면 즉시 이동 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+	float DelayBeforeReturnToLobby = 2.0f;
 
 protected:
 	virtual void BeginPlay() override;
@@ -115,6 +131,10 @@ protected:
 	FTimerHandle InitialRoleApplyTimerHandle;
 	/** 테스트 맵 직접 실행(로비 없음) 시 2초 후 역할 적용 폴백용 */
 	FTimerHandle DirectStartRoleApplyTimerHandle;
+	/** 사망 후 2초 뒤 관전 전환용 (인덱스 콜백 사용) */
+	FTimerHandle SpecTimerHandle_DeathSpectator;
+	/** 승리 후 로비 이동용 타이머 */
+	FTimerHandle ReturnToLobbyTimerHandle;
 
 	/** 테스트 맵을 로비 없이 바로 실행했을 때: 저장된 역할이 없고 전원 하체면 랜덤 팀 배정 후 상체/하체 적용 */
 	void TryApplyDirectStartRolesFallback();
@@ -122,6 +142,12 @@ protected:
 	/** 플레이어 대기 재시도 횟수. 최대 초과 시 현재 인원으로 진행해 상체 스폰 시도 (하체만 4명 방지) */
 	int32 InitialPlayerWaitRetries = 0;
 	static constexpr int32 MaxInitialPlayerWaitRetries = 24;  // 0.5초×24 = 12초
+	/** 2명 미만일 때 재시도 횟수. Seamless Travel 직후 클라이언트 재접속 전에 타이머가 돌면 하체만 스폰되므로, 2명 될 때까지 0.5초 간격 재시도 */
+	int32 MinPlayerWaitRetries = 0;
+	static constexpr int32 MaxMinPlayerWaitRetries = 24;  // 0.5초×24 = 12초
+	/** ExpectedCount==0일 때 2명에서 바로 진행하면 나중에 들어온 3·4번째가 전부 하체로 남음. 2명일 때만 추가로 잠시 대기(0.5초×6=3초) */
+	int32 ExpectedZeroWaitRetries = 0;
+	static constexpr int32 MaxExpectedZeroWaitRetries = 6;
 
 	/** 1.5초 폴백 타이머가 이미 예약되었으면 true (OnPossess 중복 예약 방지) */
 	bool bHasScheduledInitialRoleApply = false;

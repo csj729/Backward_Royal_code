@@ -54,6 +54,10 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_PlayerRole, BlueprintReadOnly, Category = "Player Role")
 	int32 ConnectedPlayerIndex;
 
+	// 파트너 객체 직접 참조 (정확한 커스터마이징 동기화용)
+	UPROPERTY(ReplicatedUsing = OnRep_PartnerPlayerState, BlueprintReadOnly, Category = "Player Role")
+	ABRPlayerState* PartnerPlayerState;
+
 	// 사용자 고유 ID (예: Steam ID, 계정 ID 등)
 	UPROPERTY(ReplicatedUsing = OnRep_UserUID, BlueprintReadWrite, Category = "User Info")
 	FString UserUID;
@@ -102,6 +106,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetPlayerRole(bool bLowerBody, int32 ConnectedIndex);
 
+	// 포인터 기반 역할 설정 (권장)
+	void SetPlayerRole(bool bLowerBody, ABRPlayerState* NewPartner);
+
+	// 파트너 직접 설정
+	UFUNCTION(BlueprintCallable, Category = "Player Role")
+	void SetPartner(ABRPlayerState* NewPartner);
+
 	/** 관전으로 설정/해제. true 시 PlayerIndex 0(관전), false 시 하체/상체 역할 유지 */
 	UFUNCTION(BlueprintCallable, Category = "Player Role")
 	void SetSpectator(bool bSpectator);
@@ -118,6 +129,9 @@ public:
 
 	UFUNCTION()
 	void OnRep_PlayerStatus();	
+
+	UFUNCTION()
+	void OnRep_PartnerPlayerState();
 
 	// 서버에서 상태 변경 시 호출
 	void SetPlayerStatus(EPlayerStatus NewStatus);

@@ -93,7 +93,7 @@ APlayerCharacter::APlayerCharacter()
 	MoveComp->NetworkMaxSmoothUpdateDistance = 256.0f;   // 이 거리 이하만 스무딩, 그 이상은 보정 허용
 	MoveComp->NetworkNoSmoothUpdateDistance = 0.0f;    // 0 = 작은 오차도 스무딩으로 흡수
 	// 서버-클라이언트 위치 오차가 이 값(단위: cm) 이하면 보정 생략 → 핑 높을 때 덜 튐
-	MoveComp->NetworkLargeClientCorrectionDistance = 500.0f;
+	MoveComp->NetworkLargeClientCorrectionDistance = 120.0f;
 }
 
 void APlayerCharacter::BeginPlay()
@@ -379,16 +379,22 @@ void APlayerCharacter::OnRep_PlayerState()
 	}
 }
 
+// [★수정★] 포인터 우선 사용
 ABRPlayerState* APlayerCharacter::GetUpperBodyPlayerState() const
 {
-	// 현재 캐릭터의 PlayerState (보통 하체/Movement 담당이 소유)
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (!MyPS) return nullptr;
 
-	// 만약 내가 상체 역할이라면 -> 내 PS 반환
+	// 내가 상체면 -> 나
 	if (!MyPS->bIsLowerBody) return MyPS;
 
-	// 만약 내가 하체 역할이라면 -> 연결된 파트너(상체)의 PS를 찾아야 함
+	// 내가 하체면 -> 파트너 (포인터가 있으면 100% 확실함)
+	if (MyPS->PartnerPlayerState)
+	{
+		return MyPS->PartnerPlayerState;
+	}
+
+	// (기존 방식 폴백: 포인터가 없을 때만 인덱스 사용)
 	if (MyPS->ConnectedPlayerIndex != -1)
 	{
 		AGameStateBase* GS = UGameplayStatics::GetGameState(this);
@@ -400,16 +406,22 @@ ABRPlayerState* APlayerCharacter::GetUpperBodyPlayerState() const
 	return nullptr;
 }
 
+// [★수정★] 포인터 우선 사용
 ABRPlayerState* APlayerCharacter::GetLowerBodyPlayerState() const
 {
-	// 현재 캐릭터의 PlayerState
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (!MyPS) return nullptr;
 
-	// 내가 하체라면 -> 내 PS 반환
+	// 내가 하체면 -> 나
 	if (MyPS->bIsLowerBody) return MyPS;
 
-	// 내가 상체라면 -> 파트너(하체) PS 찾기
+	// 내가 상체면 -> 파트너
+	if (MyPS->PartnerPlayerState)
+	{
+		return MyPS->PartnerPlayerState;
+	}
+
+	// (기존 방식 폴백)
 	if (MyPS->ConnectedPlayerIndex != -1)
 	{
 		AGameStateBase* GS = UGameplayStatics::GetGameState(this);
@@ -454,41 +466,22 @@ void APlayerCharacter::TryApplyCustomization()
 
 void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 {
-	// 1. 이미 바인딩 완료면 패스
 	if (bBoundToPartner) return;
 
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
-
-	// 내 PS조차 없으면 -> 아주 찰나의 순간일 수 있으니 이것도 재시도 대상
 	if (!MyPS)
 	{
-		// 0.5초 뒤 재시도
 		GetWorld()->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, [this, bIsLowerBody]() {
 			BindToPartnerPlayerState(bIsLowerBody);
 			}, 0.5f, false);
 		return;
 	}
 
-	// 파트너가 아예 없는 솔로/매칭 전 상태라면 재시도 불필요
-	if (MyPS->ConnectedPlayerIndex == -1) return;
+	// 1순위: 포인터 확인
+	ABRPlayerState* PartnerPS = MyPS->PartnerPlayerState;
 
-	AGameStateBase* GS = GetWorld()->GetGameState();
-
-	// 2. 파트너 인덱스가 유효하지 않거나, 아직 배열에 안 들어왔다면?
-	if (!GS || !GS->PlayerArray.IsValidIndex(MyPS->ConnectedPlayerIndex))
-	{
-		// [중요] 포기하지 말고 0.5초 뒤에 다시 확인하러 온다!
-		// 로그: 아직 파트너가 로딩 안됨, 재시도 예약...
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, [this, bIsLowerBody]() {
-			BindToPartnerPlayerState(bIsLowerBody);
-			}, 0.5f, false);
-		return;
-	}
-
-	ABRPlayerState* PartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[MyPS->ConnectedPlayerIndex]);
-
-	// 3. 인덱스는 유효한데 캐스팅이 안되거나 null인 경우 (드물지만 안전장치)
-	if (!PartnerPS)
+	// 포인터가 아직 안 왔는데, 연결된 인덱스는 있다? -> 로딩 중이니 재시도
+	if (!PartnerPS && MyPS->ConnectedPlayerIndex != -1)
 	{
 		GetWorld()->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, [this, bIsLowerBody]() {
 			BindToPartnerPlayerState(bIsLowerBody);
@@ -496,9 +489,10 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 		return;
 	}
 
-	// --- 성공 시 ---
+	// 파트너가 아예 없는 경우
+	if (!PartnerPS) return;
 
-	// 혹시 재시도 타이머가 돌고 있다면 취소
+	// --- 성공 ---
 	GetWorld()->GetTimerManager().ClearTimer(TimerHandle_RetryBindPartner);
 
 	PartnerPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);

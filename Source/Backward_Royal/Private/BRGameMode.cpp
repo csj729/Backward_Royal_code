@@ -300,6 +300,11 @@ void ABRGameMode::PostLogin(APlayerController* NewPlayer)
 	if (BRGameState)
 	{
 		BRGameState->UpdatePlayerList();
+		// 방 찾기 리스트에 표시되는 현재 인원 갱신 (호스트 세션만)
+		if (ABRGameSession* BRSession = Cast<ABRGameSession>(GameSession))
+		{
+			BRSession->UpdateSessionPlayerCount(BRGameState->PlayerCount);
+		}
 	}
 
 	// 늦게 들어온 클라이언트(2·3·4번째 등) 로비 UI 동기화: 입장한 그 사람에게만 RPC가 가도록 람다로 캡처
@@ -412,6 +417,11 @@ void ABRGameMode::Logout(AController* Exiting)
 	if (BRGameState)
 	{
 		BRGameState->UpdatePlayerList();
+		// 방 찾기 리스트에 표시되는 현재 인원 갱신 (호스트 세션만)
+		if (ABRGameSession* BRSession = Cast<ABRGameSession>(GameSession))
+		{
+			BRSession->UpdateSessionPlayerCount(BRGameState->PlayerCount);
+		}
 
 		for (int32 i = 0; i < BRGameState->PlayerArray.Num(); i++)
 		{
@@ -459,16 +469,33 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 		return;
 
 	ABRGameState* BRGameState = GetGameState<ABRGameState>();
-	if (!BRGameState || BRGameState->PlayerArray.Num() < 2)
+	if (!BRGameState)
 		return;
+	// Seamless Travel 직후 2초 타이머가 클라이언트 재접속 전에 돌면 PlayerArray가 1명(호스트만) → 상체 적용 스킵 → 하체만 스폰. 2명 될 때까지 0.5초 간격 재시도
+	if (BRGameState->PlayerArray.Num() < 2)
+	{
+		if (MinPlayerWaitRetries >= MaxMinPlayerWaitRetries)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 플레이어 2명 대기 %d회 초과 → 상체/하체 적용 포기 (현재 %d명)"), MaxMinPlayerWaitRetries, BRGameState->PlayerArray.Num());
+			MinPlayerWaitRetries = 0;
+			return;
+		}
+		MinPlayerWaitRetries++;
+		FTimerHandle H;
+		GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
+		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 2명 대기 중 (현재 %d명), 0.5초 후 재시도 (%d/%d)"), BRGameState->PlayerArray.Num(), MinPlayerWaitRetries, MaxMinPlayerWaitRetries);
+		return;
+	}
+	MinPlayerWaitRetries = 0;
 
 	// 저장된 인원 수만큼 플레이어가 다 들어올 때까지 짧게 대기 (전원 하체로 나오는 현상 방지). 최대 재시도 후에는 현재 인원으로 진행
 	const int32 ExpectedCount = GI->GetPendingRoleRestoreCount();
-	if (ExpectedCount > 0 && BRGameState->PlayerArray.Num() < ExpectedCount)
+	const int32 CurrentNum = BRGameState->PlayerArray.Num();
+	if (ExpectedCount > 0 && CurrentNum < ExpectedCount)
 	{
 		if (InitialPlayerWaitRetries >= MaxInitialPlayerWaitRetries)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 플레이어 대기 %d회 초과 → 현재 인원(%d명)으로 상체/하체 적용 진행 (하체만 스폰 방지)"), MaxInitialPlayerWaitRetries, BRGameState->PlayerArray.Num());
+			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 플레이어 대기 %d회 초과 → 현재 인원(%d명)으로 상체/하체 적용 진행 (하체만 스폰 방지)"), MaxInitialPlayerWaitRetries, CurrentNum);
 			InitialPlayerWaitRetries = 0;
 		}
 		else
@@ -476,13 +503,27 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams()
 			InitialPlayerWaitRetries++;
 			FTimerHandle H;
 			GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
-			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 대기 중 (%d/%d), 0.5초 후 재시도 (%d/%d)"), BRGameState->PlayerArray.Num(), ExpectedCount, InitialPlayerWaitRetries, MaxInitialPlayerWaitRetries);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 플레이어 대기 중 (%d/%d), 0.5초 후 재시도 (%d/%d)"), CurrentNum, ExpectedCount, InitialPlayerWaitRetries, MaxInitialPlayerWaitRetries);
 			return;
 		}
+	}
+	else if (ExpectedCount == 0 && CurrentNum == 2)
+	{
+		// 저장 인원 수가 0(예: PIE GI 비어 있음)이면 2명에서 바로 진행 → 1팀만 적용 후 3·4번째가 들어오면 전부 하체로 남음. 2명일 때만 3초 더 대기
+		if (ExpectedZeroWaitRetries < MaxExpectedZeroWaitRetries)
+		{
+			ExpectedZeroWaitRetries++;
+			FTimerHandle H;
+			GetWorld()->GetTimerManager().SetTimer(H, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, 0.5f, false);
+			UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 저장 인원 없음·현재 2명 → 4명 올 때까지 0.5초 후 재시도 (%d/%d)"), ExpectedZeroWaitRetries, MaxExpectedZeroWaitRetries);
+			return;
+		}
+		ExpectedZeroWaitRetries = 0;
 	}
 	else
 	{
 		InitialPlayerWaitRetries = 0;
+		ExpectedZeroWaitRetries = 0;
 	}
 
 	// 플래그는 하체 Pawn 확인 통과 후에만 클리어 (Pawn 없이 재시도할 때 플래그 유지)
@@ -1092,6 +1133,8 @@ void ABRGameMode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		World->GetTimerManager().ClearTimer(StagedApplyTimerHandle);
 		World->GetTimerManager().ClearTimer(StagedAllLowerReadyHandle);
 		World->GetTimerManager().ClearTimer(DirectStartRoleApplyTimerHandle);
+		World->GetTimerManager().ClearTimer(SpecTimerHandle_DeathSpectator);
+		World->GetTimerManager().ClearTimer(ReturnToLobbyTimerHandle);
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -1117,9 +1160,23 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 
 	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 플레이어 사망 확인: %s"), *VictimCharacter->GetName());
 
-	// 캐릭터에서 PlayerController 및 PlayerState 가져오기
+	// 캐릭터에서 Controller 가져오기 (없으면 PlayerState에서 시도 — 하체/상체 공유 폰 등)
 	AController* Controller = VictimCharacter->GetController();
-	ABRPlayerState* PS = Controller ? Controller->GetPlayerState<ABRPlayerState>() : nullptr;
+	ABRPlayerState* PS = nullptr;
+	if (Controller)
+	{
+		PS = Controller->GetPlayerState<ABRPlayerState>();
+	}
+	if (!PS && VictimCharacter)
+	{
+		// 폰에 붙은 PlayerState가 있다면 그 소유 컨트롤러 사용 (네트워크/공유 폰 대비)
+		PS = VictimCharacter->GetPlayerState<ABRPlayerState>();
+		if (PS)
+		{
+			Controller = PS->GetOwningController();
+			UE_LOG(LogTemp, Log, TEXT("[GameMode] 사망자 Controller를 PlayerState 소유자로 보정"));
+		}
+	}
 
 	if (PS)
 	{
@@ -1134,46 +1191,43 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 	}
 
 	// -----------------------------------------------------------
-	// [추가 기능] 2초 후 팀 전체 관전 모드 전환
+	// 팀 탈락: 같은 팀 파트너도 사망 처리 후, 2초 뒤 피해자·파트너(하체+상체) 둘 다 관전 전환
+	// (인덱스로 예약해 콜백에서 팀 번호 복제 이슈 없이 전원 전환 보장)
 	// -----------------------------------------------------------
-	ABRPlayerController* VictimPC = Cast<ABRPlayerController>(Controller);
-	ABRPlayerController* PartnerPC = nullptr;
-
-	// 파트너 찾기 (TeamNumber 기준)
-	if (PS && GetGameState<ABRGameState>())
+	ABRGameState* GS = GetGameState<ABRGameState>();
+	if (!GS || !PS)
 	{
-		for (APlayerState* OtherPS : GetGameState<ABRGameState>()->PlayerArray)
-		{
-			ABRPlayerState* BRPS = Cast<ABRPlayerState>(OtherPS);
-			if (BRPS && BRPS != PS && BRPS->TeamNumber == PS->TeamNumber)
-			{
-				PartnerPC = Cast<ABRPlayerController>(BRPS->GetOwningController());
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환 스킵: GameState 또는 피해자 PS 없음"));
+		return;
+	}
 
-				// 파트너도 사망 처리 (상태 동기화)
-				if (BRPS->CurrentStatus != EPlayerStatus::Dead)
-				{
-					BRPS->SetPlayerStatus(EPlayerStatus::Dead);
-				}
-				break;
+	const int32 VictimPlayerIndex = GS->PlayerArray.Find(PS);
+	if (VictimPlayerIndex == INDEX_NONE)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환 스킵: 피해자 PlayerArray 인덱스 없음"));
+		return;
+	}
+
+	int32 PartnerPlayerIndex = INDEX_NONE;
+	for (APlayerState* OtherPS : GS->PlayerArray)
+	{
+		ABRPlayerState* BRPS = Cast<ABRPlayerState>(OtherPS);
+		if (BRPS && BRPS != PS && BRPS->TeamNumber == PS->TeamNumber)
+		{
+			PartnerPlayerIndex = GS->PlayerArray.Find(BRPS);
+			if (BRPS->CurrentStatus != EPlayerStatus::Dead)
+			{
+				BRPS->SetPlayerStatus(EPlayerStatus::Dead);
 			}
+			break;
 		}
 	}
 
-	// 타이머 설정 (2초 후 관전 전환)
-	// 피해자 혹은 파트너가 존재할 때만 타이머 실행
-	if (VictimPC || PartnerPC)
-	{
-		FTimerHandle SpecTimerHandle;
-		FTimerDelegate TimerDel;
-
-		// Weak Pointer로 변환하여 전달 (타이머 실행 시점에 객체 유효성 보장)
-		TWeakObjectPtr<ABRPlayerController> WeakVictimPC(VictimPC);
-		TWeakObjectPtr<ABRPlayerController> WeakPartnerPC(PartnerPC);
-
-		TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectator, WeakVictimPC, WeakPartnerPC);
-
-		GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle, TimerDel, 2.0f, false);
-	}
+	FTimerDelegate TimerDel;
+	TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectatorByPlayerIndices, VictimPlayerIndex, PartnerPlayerIndex);
+	GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle_DeathSpectator, TimerDel, 2.0f, false);
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 2초 후 하체·상체 관전 전환 예약 (VictimIdx=%d, PartnerIdx=%d)"),
+		PS->TeamNumber, VictimPlayerIndex, PartnerPlayerIndex);
 }
 
 void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> VictimPC, TWeakObjectPtr<ABRPlayerController> PartnerPC)
@@ -1187,4 +1241,156 @@ void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> Vict
 	{
 		PartnerPC->StartSpectatingMode();
 	}
+}
+
+void ABRGameMode::SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, int32 PartnerPlayerIndex)
+{
+	ABRGameState* GS = GetGameState<ABRGameState>();
+	if (!GS)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: GameState 없음"));
+		return;
+	}
+
+	auto TrySwitchToSpectator = [this, GS](int32 PlayerIndex) -> bool
+	{
+		if (PlayerIndex == INDEX_NONE || !GS->PlayerArray.IsValidIndex(PlayerIndex)) return false;
+		ABRPlayerState* BRPS = Cast<ABRPlayerState>(GS->PlayerArray[PlayerIndex]);
+		if (!BRPS) return false;
+		ABRPlayerController* PC = Cast<ABRPlayerController>(BRPS->GetOwningController());
+		// 상체 등 원격 플레이어에서 OwningController가 비어 있을 수 있음 → 월드에서 해당 PlayerState 소유 컨트롤러 검색
+		if (!PC && GetWorld())
+		{
+			for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+			{
+				APlayerController* C = It->Get();
+				if (C && C->GetPlayerState<ABRPlayerState>() == BRPS)
+				{
+					PC = Cast<ABRPlayerController>(C);
+					if (PC) break;
+				}
+			}
+		}
+		if (!PC)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: %s Controller 없음"), *BRPS->GetPlayerName());
+			return false;
+		}
+		PC->StartSpectatingMode();
+		UE_LOG(LogTemp, Log, TEXT("[GameMode] 관전 전환 완료: %s (Index %d)"), *BRPS->GetPlayerName(), PlayerIndex);
+		return true;
+	};
+
+	// 상체(파트너) 먼저 전환 → 시체에 붙은 상체 폰이 공격 모션 재생하는 것 방지
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 관전 전환 실행: VictimIndex=%d, PartnerIndex=%d"), VictimPlayerIndex, PartnerPlayerIndex);
+	TrySwitchToSpectator(PartnerPlayerIndex);
+	TrySwitchToSpectator(VictimPlayerIndex);
+
+	// 승리 조건 체크: 생존 팀이 1개면 해당 팀 승리
+	CheckAndEndGameIfWinner();
+}
+
+void ABRGameMode::CheckAndEndGameIfWinner()
+{
+	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client) return;
+
+	ABRGameState* GS = GetGameState<ABRGameState>();
+	if (!GS) return;
+
+	TSet<int32> AliveTeamNumbers;
+	for (APlayerState* PS : GS->PlayerArray)
+	{
+		ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS);
+		if (!BRPS || BRPS->bIsSpectatorSlot || BRPS->TeamNumber <= 0) continue;
+		if (BRPS->CurrentStatus == EPlayerStatus::Dead) continue;
+
+		AliveTeamNumbers.Add(BRPS->TeamNumber);
+	}
+
+	if (AliveTeamNumbers.Num() == 1)
+	{
+		const int32 WinnerTeam = AliveTeamNumbers.Array()[0];
+		GS->EndGameWithWinner(WinnerTeam);
+		// 승리 확인만 함. 로비 이동은 우승 UI에서 '다음' 버튼 시 TravelToLobby() 호출로 처리 예정.
+	}
+}
+
+void ABRGameMode::TravelToLobby()
+{
+	if (!HasAuthority()) return;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[게임 종료] 로비 이동 스킵: World 없음"));
+		return;
+	}
+
+	// LobbyMapPath가 블루프린트에서 비어 있으면 기본 로비 맵 사용 (BP_MainGameMode에서 미설정 시)
+	static const FString DefaultLobbyMapPath = TEXT("/Game/Main/Level/Main_Scene");
+	FString MapToUse = LobbyMapPath.IsEmpty() ? DefaultLobbyMapPath : LobbyMapPath;
+	if (LobbyMapPath.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[게임 종료] LobbyMapPath 비어 있음 — 기본 로비 맵 사용: %s"), *MapToUse);
+	}
+
+	ReturnToLobbyTimerHandle.Invalidate();
+
+	const bool bIsPIE = World->IsPlayInEditor();
+	const bool bShouldUseSeamlessTravel = bUseSeamlessTravel && !bIsPIE;
+	const FString TravelURL = MapToUse + TEXT("?listen");
+
+	UE_LOG(LogTemp, Warning, TEXT("[게임 종료] 로비로 이동: %s"), *MapToUse);
+
+	if (bShouldUseSeamlessTravel)
+	{
+		World->ServerTravel(TravelURL, true);
+	}
+	else
+	{
+		if (bIsPIE)
+		{
+			const FString ServerAddr = TEXT("127.0.0.1:7777");
+			const FString ClientTravelURL = ServerAddr + MapToUse;
+			for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+			{
+				APlayerController* PC = It->Get();
+				if (!PC || PC->IsLocalController()) continue;
+				if (ABRPlayerController* BRPC = Cast<ABRPlayerController>(PC))
+				{
+					BRPC->ClientTravelToGameMap(ClientTravelURL);
+					UE_LOG(LogTemp, Log, TEXT("[게임 종료] PIE: 원격 클라이언트에게 로비 ClientTravel 전송"));
+				}
+			}
+		}
+		World->ServerTravel(TravelURL, true);
+	}
+}
+
+void ABRGameMode::SwitchEliminatedTeamToSpectator(int32 EliminatedTeamNumber)
+{
+	ABRGameState* GS = GetGameState<ABRGameState>();
+	if (!GS)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: GameState 없음"));
+		return;
+	}
+
+	int32 SwitchedCount = 0;
+	for (APlayerState* OtherPS : GS->PlayerArray)
+	{
+		ABRPlayerState* BRPS = Cast<ABRPlayerState>(OtherPS);
+		if (!BRPS || BRPS->TeamNumber != EliminatedTeamNumber) continue;
+
+		ABRPlayerController* PC = Cast<ABRPlayerController>(BRPS->GetOwningController());
+		if (!PC)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: %s (팀%d) Controller 없음"), *BRPS->GetPlayerName(), EliminatedTeamNumber);
+			continue;
+		}
+		PC->StartSpectatingMode();
+		SwitchedCount++;
+		UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 탈락 관전 전환: %s (%s)"), *BRPS->GetPlayerName(), BRPS->bIsLowerBody ? TEXT("하체") : TEXT("상체"));
+	}
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 하체·상체 전원 관전 전환 완료 (%d명)"), EliminatedTeamNumber, SwitchedCount);
 }

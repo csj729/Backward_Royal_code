@@ -8,6 +8,7 @@
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnPlayerListChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGameEndedWithWinner, int32, WinningTeamNumber);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRGameState : public AGameStateBase
@@ -45,6 +46,10 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_CanStartGame, BlueprintReadOnly, Category = "Room")
 	bool bCanStartGame;
 
+	/** 승리한 팀 번호 (0=진행중, 1 이상=해당 팀 승리). 게임 종료 시 서버에서 설정, 복제됨 */
+	UPROPERTY(ReplicatedUsing = OnRep_WinningTeamNumber, BlueprintReadOnly, Category = "Game")
+	int32 WinningTeamNumber = 0;
+
 	// 플레이어 목록 변경 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerListChanged OnPlayerListChanged;
@@ -52,6 +57,10 @@ public:
 	// 팀 변경 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnTeamChanged OnTeamChanged;
+
+	/** 게임 종료(승리 확정) 시 브로드캐스트. WinningTeamNumber 전달 */
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnGameEndedWithWinner OnGameEndedWithWinner;
 
 	// 플레이어 목록 업데이트
 	UFUNCTION(BlueprintCallable, Category = "Room")
@@ -132,6 +141,13 @@ public:
 	// 방 제목 복제 수신 시 호출
 	UFUNCTION()
 	void OnRep_RoomTitle();
+
+	/** 승리 팀 번호 복제 수신 시 호출 (UI 갱신용) */
+	UFUNCTION()
+	void OnRep_WinningTeamNumber();
+
+	/** [서버 전용] 승리 팀 설정 후 게임 종료 처리. WinningTeamNumber 설정 및 OnGameEndedWithWinner 브로드캐스트 */
+	void EndGameWithWinner(int32 WinnerTeamNumber);
 
 	/** 대기열 슬롯 압축: 빈 칸(-1) 제거 후 뒤 플레이어를 앞으로 당김. AssignPlayerToLobbyTeam / MovePlayerToLobbyEntry 후 호출 */
 	void CompactLobbyEntrySlots();

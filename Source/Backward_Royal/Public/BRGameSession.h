@@ -53,6 +53,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session", meta = (DisplayName = "Get Session Current Players"))
 	int32 GetSessionCurrentPlayers(int32 SessionIndex) const;
 
+	/** 호스트 전용: 세션 광고에 표시되는 현재 인원을 갱신합니다. PostLogin/Logout 후 서버에서 호출 */
+	UFUNCTION(BlueprintCallable, Category = "Session")
+	void UpdateSessionPlayerCount(int32 CurrentCount);
+
 	// 세션이 생성되어 있는지 확인 (블루프린트에서 사용 가능)
 	UFUNCTION(BlueprintCallable, Category = "Session")
 	bool HasActiveSession() const;

@@ -19,13 +19,13 @@ class BACKWARD_ROYAL_API APlayerCharacter : public ABaseCharacter
 
 public:
 	APlayerCharacter();
+	virtual void OnRep_PlayerState() override;
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void Restart() override;
-	virtual void OnRep_PlayerState() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// --- Input Functions ---
