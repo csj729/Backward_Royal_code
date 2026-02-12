@@ -1179,6 +1179,7 @@ void UBRGameInstance::LoadPlayerNameFromUserInfo() {
 void UBRGameInstance::SaveCustomization(const FBRCustomizationData &NewData)
 {
     LocalCustomizationData = NewData;
+    LocalCustomizationData.bIsDataValid = true;
 
     UE_LOG(LogBRGameInstance, Log,
             TEXT("Local Customization Saved: Head(%d), Leg(%d)"), NewData.HeadID,

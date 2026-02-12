@@ -361,14 +361,15 @@ void APlayerCharacter::OnRep_PlayerState()
 	if (MyPS)
 	{
 		// 1-1. 내 커마 정보가 오면 알려줘
-		MyPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
-		MyPS->OnCustomizationDataChanged.AddDynamic(this, &APlayerCharacter::TryApplyCustomization);
+		if (!bUpperBodyApplied || !bLowerBodyApplied)
+		{
+			MyPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
+			MyPS->OnCustomizationDataChanged.AddDynamic(this, &APlayerCharacter::TryApplyCustomization);
 
-		// 1-2. 내 역할(상/하체)이나 파트너가 정해지면 알려줘
-		// (기존 코드에 OnPlayerRoleChanged 델리게이트가 이미 있다고 가정)
-		MyPS->OnPlayerRoleChanged.AddDynamic(this, &APlayerCharacter::BindToPartnerPlayerState);
+			// 파트너 바인딩은 로직 유지를 위해 남겨둠 (필요에 따라 이것도 막을 수 있음)
+			MyPS->OnPlayerRoleChanged.AddDynamic(this, &APlayerCharacter::BindToPartnerPlayerState);
+		}
 
-		// 혹시 이미 데이터가 와 있을 수도 있으니 한번 체크
 		TryApplyCustomization();
 
 		// 혹시 이미 파트너가 정해져 있을 수도 있으니 체크
@@ -435,32 +436,56 @@ ABRPlayerState* APlayerCharacter::GetLowerBodyPlayerState() const
 
 void APlayerCharacter::TryApplyCustomization()
 {
-	// 이미 둘 다 적용 끝났으면 더 이상 연산하지 않음 (최적화)
-	if (bUpperBodyApplied && bLowerBodyApplied) return;
+	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
+	if (!MyPS) return;
 
+	// [핵심 수정] 파트너 정보가 아직 도착하지 않았다면 절대 적용하지 말고 리턴할 것!
+	// (혼자 테스트하는 경우를 대비해 ConnectedPlayerIndex가 -1이 아닐 때만 체크)
+	if (MyPS->ConnectedPlayerIndex != -1 && MyPS->PartnerPlayerState == nullptr)
+	{
+		// 아직 파트너 포인터가 리플리케이션 되지 않음 -> 역할 판단이 부정확할 수 있음 -> 보류
+		// (나중에 OnRep_PartnerPlayerState -> OnRep_PlayerState -> 이 함수가 다시 호출됨)
+		return;
+	}
+
+	// [기존 로직 유지]
 	ABRPlayerState* UpperPS = GetUpperBodyPlayerState();
 	ABRPlayerState* LowerPS = GetLowerBodyPlayerState();
 
-	// --- 1. 상체 적용 ---
-	// 아직 적용 안 됐고(false), 데이터가 존재하면(HeadID != 0) 적용
-	if (!bUpperBodyApplied && UpperPS && UpperPS->CustomizationData.HeadID != 0)
+	// 1. 상체 적용 (유효한 데이터가 있고, 아직 적용 안 됐을 때)
+	if (!bUpperBodyApplied && UpperPS && UpperPS->CustomizationData.bIsDataValid)
 	{
-		ApplyMeshFromID(EArmorSlot::Head, UpperPS->CustomizationData.HeadID);
-		ApplyMeshFromID(EArmorSlot::Chest, UpperPS->CustomizationData.ChestID);
-		ApplyMeshFromID(EArmorSlot::Hands, UpperPS->CustomizationData.HandID);
+		// [추가 검증] 가져온 PS가 진짜 상체 역할인지 더블 체크
+		if (!UpperPS->bIsLowerBody)
+		{
+			ApplyMeshFromID(EArmorSlot::Head, UpperPS->CustomizationData.HeadID);
+			ApplyMeshFromID(EArmorSlot::Chest, UpperPS->CustomizationData.ChestID);
+			ApplyMeshFromID(EArmorSlot::Hands, UpperPS->CustomizationData.HandID);
 
-		bUpperBodyApplied = true; // 완료 마킹 (이후에는 다시 적용 안 함)
-		LOG_PLAYER(Display, TEXT("Upper Body Customization Applied"));
+			bUpperBodyApplied = true;
+
+			// 델리게이트 해제
+			UpperPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
+
+			LOG_PLAYER(Display, TEXT("Upper Body Locked (Owner: %s)"), *UpperPS->GetPlayerName());
+		}
 	}
 
-	// --- 2. 하체 적용 ---
-	if (!bLowerBodyApplied && LowerPS && LowerPS->CustomizationData.LegID != 0)
+	// 2. 하체 적용
+	if (!bLowerBodyApplied && LowerPS && LowerPS->CustomizationData.bIsDataValid)
 	{
-		ApplyMeshFromID(EArmorSlot::Legs, LowerPS->CustomizationData.LegID);
-		ApplyMeshFromID(EArmorSlot::Feet, LowerPS->CustomizationData.FootID);
+		// [추가 검증] 가져온 PS가 진짜 하체 역할인지 더블 체크
+		if (LowerPS->bIsLowerBody)
+		{
+			ApplyMeshFromID(EArmorSlot::Legs, LowerPS->CustomizationData.LegID);
+			ApplyMeshFromID(EArmorSlot::Feet, LowerPS->CustomizationData.FootID);
 
-		bLowerBodyApplied = true; // 완료 마킹
-		LOG_PLAYER(Display, TEXT("Lower Body Customization Applied"));
+			bLowerBodyApplied = true;
+
+			LowerPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
+
+			LOG_PLAYER(Display, TEXT("Lower Body Locked (Owner: %s)"), *LowerPS->GetPlayerName());
+		}
 	}
 }
 
@@ -471,9 +496,11 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (!MyPS)
 	{
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, [this, bIsLowerBody]() {
-			BindToPartnerPlayerState(bIsLowerBody);
-			}, 0.5f, false);
+		if (UWorld* World = GetWorld())
+		{
+			FTimerDelegate RetryDelegate = FTimerDelegate::CreateUObject(this, &APlayerCharacter::BindToPartnerPlayerState, bIsLowerBody);
+			World->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, RetryDelegate, 0.5f, false);
+		}
 		return;
 	}
 
@@ -483,9 +510,11 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 	// 포인터가 아직 안 왔는데, 연결된 인덱스는 있다? -> 로딩 중이니 재시도
 	if (!PartnerPS && MyPS->ConnectedPlayerIndex != -1)
 	{
-		GetWorld()->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, [this, bIsLowerBody]() {
-			BindToPartnerPlayerState(bIsLowerBody);
-			}, 0.5f, false);
+		if (UWorld* World = GetWorld())
+		{
+			FTimerDelegate RetryDelegate = FTimerDelegate::CreateUObject(this, &APlayerCharacter::BindToPartnerPlayerState, bIsLowerBody);
+			World->GetTimerManager().SetTimer(TimerHandle_RetryBindPartner, RetryDelegate, 0.5f, false);
+		}
 		return;
 	}
 
