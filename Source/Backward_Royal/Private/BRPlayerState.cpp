@@ -14,10 +14,9 @@ ABRPlayerState::ABRPlayerState()
 	TeamNumber = 0;
 	bIsHost = false;
 	bIsReady = false;
-	bIsSpectatorSlot = false;	
+	bIsSpectatorSlot = false;
 	bIsLowerBody = true; // 기본값은 하체
 	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
-	PartnerPlayerState = nullptr;
 	UserUID = TEXT("");
 }
 
@@ -193,31 +192,9 @@ void ABRPlayerState::SetSpectator(bool bSpectator)
 	}
 }
 
-void ABRPlayerState::SetPartner(ABRPlayerState* NewPartner)
-{
-	if (HasAuthority())
-	{
-		PartnerPlayerState = NewPartner;
-		OnRep_PartnerPlayerState(); // 서버에서도 로직 수행을 위해 호출
-	}
-}
-
 void ABRPlayerState::OnRep_PlayerRole()
 {
 	// UI 업데이트를 위한 이벤트 발생 가능
-}
-
-// 파트너 정보 수신 시 호출
-void ABRPlayerState::OnRep_PartnerPlayerState()
-{
-	// 캐릭터에게 파트너 정보가 갱신되었음을 알림 (커스터마이징 적용 트리거)
-	if (APawn* MyPawn = GetPawn())
-	{
-		if (APlayerCharacter* PC = Cast<APlayerCharacter>(MyPawn))
-		{
-			PC->OnRep_PlayerState();
-		}
-	}
 }
 
 void ABRPlayerState::SwapControlWithPartner()
@@ -394,28 +371,4 @@ void ABRPlayerState::OnRep_PlayerStatus()
 
 	// 2. 로그
 	UE_LOG(LogTemp, Log, TEXT("Player %s Status Changed to %d"), *GetPlayerName(), (int32)CurrentStatus);
-}
-
-void ABRPlayerState::CopyProperties(APlayerState* PlayerState)
-{
-	Super::CopyProperties(PlayerState);
-
-	// 새로 생성된 PlayerState로 형변환
-	ABRPlayerState* NewBRPlayerState = Cast<ABRPlayerState>(PlayerState);
-	if (NewBRPlayerState)
-	{
-		// [중요] 기존 데이터를 새 PlayerState로 복사
-		NewBRPlayerState->CustomizationData = CustomizationData; // 커스터마이징 정보 유지
-		NewBRPlayerState->TeamNumber = TeamNumber;               // 팀 번호 유지
-		NewBRPlayerState->bIsHost = bIsHost;                     // 방장 권한 유지
-		NewBRPlayerState->bIsReady = bIsReady;                   // 준비 상태 유지
-		NewBRPlayerState->bIsLowerBody = bIsLowerBody;           // 역할 유지
-		NewBRPlayerState->UserUID = UserUID;                     // UID 유지
-		NewBRPlayerState->ConnectedPlayerIndex = ConnectedPlayerIndex; // 연결 인덱스 유지
-
-		// 파트너 포인터 복사
-		NewBRPlayerState->PartnerPlayerState = PartnerPlayerState;
-
-		UE_LOG(LogTemp, Log, TEXT("[CopyProperties] %s의 데이터가 다음 레벨로 복사되었습니다."), *GetPlayerName());
-	}
 }
