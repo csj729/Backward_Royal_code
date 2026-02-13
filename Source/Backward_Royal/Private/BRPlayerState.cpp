@@ -17,6 +17,7 @@ ABRPlayerState::ABRPlayerState()
 	bIsSpectatorSlot = false;
 	bIsLowerBody = true; // 기본값은 하체
 	ConnectedPlayerIndex = -1; // 기본값은 연결 없음
+	PartnerPlayerState = nullptr;
 	UserUID = TEXT("");
 }
 
@@ -146,6 +147,7 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 		bIsLowerBody = bLowerBody;
 		ConnectedPlayerIndex = ConnectedIndex;
 		PartnerPlayerState = nullptr;	
+
 		if (ConnectedIndex >= 0 && GetWorld())
 		{
 			if (ABRGameState* GS = GetWorld()->GetGameState<ABRGameState>())
@@ -163,8 +165,6 @@ void ABRPlayerState::SetPlayerRole(bool bLowerBody, int32 ConnectedIndex)
 
 						// 파트너 -> 나 (이 부분이 빠지면 한쪽만 연결됨)
 						TargetPartner->PartnerPlayerState = this;
-						TargetPartner->ConnectedPlayerIndex = -1; // 필요 시 인덱스 동기화 로직에 맞춰 설정 (보통 GameState에서 관리)
-
 						// 변경사항 즉시 전파
 						TargetPartner->OnRep_PartnerPlayerState();
 					}
@@ -206,7 +206,9 @@ void ABRPlayerState::SetSpectator(bool bSpectator)
 
 void ABRPlayerState::OnRep_PlayerRole()
 {
-	// UI 업데이트를 위한 이벤트 발생 가능
+	// [수정] 역할 정보(상체/하체, 파트너 인덱스 등)가 갱신되면 델리게이트를 방송하여
+	// 캐릭터(PlayerCharacter)가 이를 감지하고 파트너 연결을 재시도하도록 함.
+	OnPlayerRoleChanged.Broadcast(bIsLowerBody);
 }
 
 void ABRPlayerState::OnRep_PartnerPlayerState()
@@ -223,7 +225,7 @@ void ABRPlayerState::OnRep_PartnerPlayerState()
 		// (필요하다면 여기서 내 캐릭터에게 알림)
 	}
 
-	// 캐릭터에게 "야, 파트너 정보 갱신됐어. 커마 다시 입혀봐" 라고 알림
+	// 캐릭터에게 커마 다시 적용하라고 알림
 	if (APawn* MyPawn = GetPawn())
 	{
 		if (APlayerCharacter* PC = Cast<APlayerCharacter>(MyPawn))
@@ -408,4 +410,31 @@ void ABRPlayerState::OnRep_PlayerStatus()
 
 	// 2. 로그
 	UE_LOG(LogTemp, Log, TEXT("Player %s Status Changed to %d"), *GetPlayerName(), (int32)CurrentStatus);
+}
+
+void ABRPlayerState::CopyProperties(APlayerState* PlayerState)
+{
+	Super::CopyProperties(PlayerState);
+
+	// 인자로 들어온 PlayerState는 "새로 생성된(다음 레벨의) PlayerState"입니다.
+	ABRPlayerState* NewBRPlayerState = Cast<ABRPlayerState>(PlayerState);
+	if (NewBRPlayerState)
+	{
+		// 1. 값(Value) 타입 데이터는 복사 (커스터마이징 정보 등)
+		NewBRPlayerState->CustomizationData = CustomizationData;
+		NewBRPlayerState->TeamNumber = TeamNumber;
+		NewBRPlayerState->bIsHost = bIsHost;
+		NewBRPlayerState->bIsReady = bIsReady;
+		NewBRPlayerState->bIsLowerBody = bIsLowerBody;
+		NewBRPlayerState->UserUID = UserUID;
+
+		// 2. 연결된 인덱스도 복사 (서버가 나중에 이걸 보고 파트너를 다시 찾아줌)
+		NewBRPlayerState->ConnectedPlayerIndex = ConnectedPlayerIndex;
+
+		// 3. [핵심 수정] 파트너 포인터는 '이전 레벨의 객체' 주소이므로 절대 복사 금지!
+		// nullptr로 초기화해야 안전하며, 이후 로직에서 다시 바인딩됩니다.
+		NewBRPlayerState->PartnerPlayerState = nullptr;
+
+		UE_LOG(LogTemp, Log, TEXT("[CopyProperties] Data Copied for %s (Partner Ptr Reset)"), *GetPlayerName());
+	}
 }

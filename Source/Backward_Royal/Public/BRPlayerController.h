@@ -268,6 +268,8 @@ private:
 	/** 상체 ViewTarget/입력 지연 재적용 타이머 (OnRep_Pawn 후 한 틱 뒤 재적용) */
 	FTimerHandle UpperBodyViewInputDelayHandle;
 
+	FTimerHandle TimerHandle_RetrySubmitCustomization;
+
 	/** 호스트가 방 나가기 후 메인 맵에서 ListenServer NetDriver를 한 번만 종료해 Standalone으로 전환 (방 찾기 가능하도록) */
 	FTimerHandle ShutdownListenServerTimerHandle;
 	void TryShutdownListenServerForRoomSearch();

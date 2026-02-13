@@ -27,6 +27,7 @@ protected:
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void Restart() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	// --- Input Functions ---
 	void Move(const FInputActionValue& Value);
@@ -50,8 +51,6 @@ protected:
 	// [신규] 컴포넌트의 스태미나 변화를 UI로 전달(Relay)하는 콜백
 	UFUNCTION()
 	void HandleStaminaChanged(float CurrentVal, float MaxVal);
-
-	FTimerHandle TimerHandle_RetryBindPartner; // 커마 적용용 타이머 핸들
 
 	// [신규] 이벤트 기반 커마 적용 시도
 	UFUNCTION()
@@ -143,7 +142,7 @@ protected:
 	class AUpperBodyPawn* CurrentUpperBodyPawn;
 
 private:
-	FTimerHandle CustomizationUpdateTimer; // 동기화 딜레이 처리용
+	FTimerHandle TimerHandle_RetryBindPartner;
 
 	// 상체/하체 적용 완료 여부 플래그 (중복 적용 방지)
 	bool bUpperBodyApplied = false;

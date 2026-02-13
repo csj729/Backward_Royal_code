@@ -370,7 +370,21 @@ void ABRPlayerController::BeginPlay()
 
 	if (IsLocalController())
 	{
-		SubmitCustomizationToServer();
+		// PlayerState가 아직 없을 수 있으므로 타이머로 체크 후 전송
+		FTimerHandle SubmitTimer;
+		GetWorld()->GetTimerManager().SetTimer(SubmitTimer, [this]()
+			{
+				if (GetPlayerState<ABRPlayerState>())
+				{
+					SubmitCustomizationToServer();
+				}
+				else
+				{
+					// 만약 아직도 없다면 0.5초 뒤 재시도 (재귀 호출 대신 간단히 딜레이 처리 예시)
+					FTimerHandle RetryHandle;
+					GetWorld()->GetTimerManager().SetTimer(RetryHandle, this, &ABRPlayerController::SubmitCustomizationToServer, 0.5f, false);
+				}
+			}, 0.2f, false);
 	}
 }
 
@@ -1608,29 +1622,25 @@ void ABRPlayerController::ShowRoomInfo()
 
 void ABRPlayerController::SetupRoleInput(bool bIsLower)
 {
-	ULocalPlayer* LocalPlayer = GetLocalPlayer();
-	if (!LocalPlayer) return;
+    ULocalPlayer* LocalPlayer = GetLocalPlayer();
+    if (!LocalPlayer) return;
 
-	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
-	{
-		Subsystem->ClearAllMappings();
+    if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+    {
+        Subsystem->ClearAllMappings();
 
-		UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
-		if (TargetContext)
-		{
-			Subsystem->AddMappingContext(TargetContext, 0);
-		}
-	}
+        UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
+        if (TargetContext)
+        {
+            Subsystem->AddMappingContext(TargetContext, 0);
+        }
+    }
 
-	// [추가] 하체 캐릭터라면 입력 바인딩(함수 연결)을 강제로 다시 시키기
-	if (bIsLower)
-	{
-		if (APawn* P = GetPawn())
-		{
-			// 클라이언트에게 입력 시스템 재시작 명령
-			ClientRestart(P);
-		}
-	}
+    if (APawn* P = GetPawn())
+    {
+        // 클라이언트에게 입력 시스템 재시작 명령 (SetupPlayerInputComponent 재호출 유도)
+        ClientRestart(P);
+    }
 }
 
 // ========== UI 관리 함수 구현 ==========
@@ -2049,17 +2059,32 @@ void ABRPlayerController::ShowMenuWidget(TSubclassOf<UUserWidget> WidgetClass)
 
 void ABRPlayerController::SubmitCustomizationToServer()
 {
-	UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+	// 1. PlayerState 확인
 	ABRPlayerState* PS = GetPlayerState<ABRPlayerState>();
-
-	if (GI && PS)
+	if (!PS)
 	{
-		// 1. 로컬에 저장된 정보 가져오기
-		FBRCustomizationData LocalData = GI->GetLocalCustomization();
+		// PS가 아직 없으면 0.5초 뒤 재시도 (매우 중요: 접속 초기엔 PS가 null일 수 있음)
+		GetWorldTimerManager().SetTimer(TimerHandle_RetrySubmitCustomization, this, &ABRPlayerController::SubmitCustomizationToServer, 0.5f, false);
+		return;
+	}
 
-		// 2. PlayerState의 Server RPC 호출 (이미 구현되어 있음)
-		PS->ServerSetCustomizationData(LocalData);
+	// 2. GameInstance에서 내 저장 데이터 가져오기
+	UBRGameInstance* GI = GetGameInstance<UBRGameInstance>();
+	if (GI)
+	{
+		// [핵심] 로컬 데이터를 꺼내서
+		FBRCustomizationData MyData = GI->GetLocalCustomization();
 
-		UE_LOG(LogTemp, Log, TEXT("커스터마이징 정보를 서버로 전송했습니다. HeadID: %d"), LocalData.HeadID);
+		// [안전장치] 만약 유효하지 않다면(초기 실행 등), 기본값이라도 유효하게 만들어서 보냄
+		if (!MyData.bIsDataValid)
+		{
+			MyData.bIsDataValid = true;
+			// 필요하다면 기본 ID 설정 (예: 1번 옷)
+		}
+
+		// 3. 서버로 전송 (Server RPC)
+		PS->ServerSetCustomizationData(MyData);
+
+		UE_LOG(LogTemp, Log, TEXT("[BRPlayerController] Sent Customization Data to Server"));
 	}
 }
