@@ -379,22 +379,22 @@ void APlayerCharacter::OnRep_PlayerState()
 	}
 }
 
-// [★수정★] 포인터 우선 사용
+// 상체 플레이어 찾기 (포인터 우선)
 ABRPlayerState* APlayerCharacter::GetUpperBodyPlayerState() const
 {
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (!MyPS) return nullptr;
 
-	// 내가 상체면 -> 나
+	// 1. 내가 상체면 -> 나 자신 리턴
 	if (!MyPS->bIsLowerBody) return MyPS;
 
-	// 내가 하체면 -> 파트너 (포인터가 있으면 100% 확실함)
+	// 2. [핵심] 내가 하체면 -> PartnerPlayerState 포인터 확인 (가장 확실함)
 	if (MyPS->PartnerPlayerState)
 	{
 		return MyPS->PartnerPlayerState;
 	}
 
-	// (기존 방식 폴백: 포인터가 없을 때만 인덱스 사용)
+	// 3. 포인터가 아직 null이면 -> 차선책으로 인덱스 사용 (불확실할 수 있음)
 	if (MyPS->ConnectedPlayerIndex != -1)
 	{
 		AGameStateBase* GS = UGameplayStatics::GetGameState(this);
@@ -406,22 +406,22 @@ ABRPlayerState* APlayerCharacter::GetUpperBodyPlayerState() const
 	return nullptr;
 }
 
-// [★수정★] 포인터 우선 사용
+// 하체 플레이어 찾기 (포인터 우선)
 ABRPlayerState* APlayerCharacter::GetLowerBodyPlayerState() const
 {
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (!MyPS) return nullptr;
 
-	// 내가 하체면 -> 나
+	// 1. 내가 하체면 -> 나 자신 리턴
 	if (MyPS->bIsLowerBody) return MyPS;
 
-	// 내가 상체면 -> 파트너
+	// 2. [핵심] 내가 상체면 -> PartnerPlayerState 포인터 확인
 	if (MyPS->PartnerPlayerState)
 	{
 		return MyPS->PartnerPlayerState;
 	}
 
-	// (기존 방식 폴백)
+	// 3. 차선책: 인덱스
 	if (MyPS->ConnectedPlayerIndex != -1)
 	{
 		AGameStateBase* GS = UGameplayStatics::GetGameState(this);

@@ -25,7 +25,7 @@ struct FBRCustomizationData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 FootID = 0;
 
-    // 필요 시 색상 정보도 추가 가능
-    // UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    // FLinearColor PrimaryColor;
+    // 데이터가 유효한지 체크 (전송 시 true로 설정 필수)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bIsDataValid = false;
 };
