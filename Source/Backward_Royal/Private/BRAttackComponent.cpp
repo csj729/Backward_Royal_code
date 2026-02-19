@@ -9,6 +9,9 @@
 
 DEFINE_LOG_CATEGORY(LogAttackComp);
 
+// 기본 펀치 데미지 전역 변수
+float UBRAttackComponent::BasePunchDamage = 10.f;
+
 UBRAttackComponent::UBRAttackComponent()
 {
     PrimaryComponentTick.bCanEverTick = false;
@@ -204,7 +207,7 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     }
     else
     {
-        CalculatedDamage = ImpactForce * 0.001f;
+        CalculatedDamage = (ImpactForce * 0.001f) + BasePunchDamage;
     }
 
     // 디버그 출력

@@ -57,6 +57,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Game")
 	void StartGame();
 
+	/** 게임 진행 중(로비가 아닌 스테이지 맵)일 때 새 플레이어 입장 차단. true면 차단, false면 항상 허용(기본: true) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings", meta = (DisplayName = "게임 진행 중 입장 차단"))
+	bool bBlockJoinWhenGameStarted = true;
+
+	/** 연결 시도 시 호출. ErrorMessage를 설정하면 해당 플레이어 입장 거부 */
+	virtual void PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage) override;
+
 	// 플레이어 로그인 처리
 	virtual void PostLogin(APlayerController* NewPlayer) override;
 

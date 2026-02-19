@@ -17,6 +17,8 @@
 #include "TimerManager.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "AssetRegistry/IAssetRegistry.h"
+#include "Misc/Paths.h"
+#include "OnlineSubsystemTypes.h"
 
 ABRGameMode::ABRGameMode()
 {
@@ -150,6 +152,39 @@ void ABRGameMode::ScheduleInitialRoleApplyIfNeeded()
 	const float InitialDelay = 2.0f;
 	GetWorld()->GetTimerManager().SetTimer(InitialRoleApplyTimerHandle, this, &ABRGameMode::ApplyRoleChangesForRandomTeams, InitialDelay, false);
 	UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] %.1f초 후 상체/하체 Pawn 적용 예정 (한 번만 예약)"), InitialDelay);
+}
+
+void ABRGameMode::PreLogin(const FString& Options, const FString& Address, const FUniqueNetIdRepl& UniqueId, FString& ErrorMessage)
+{
+	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
+	if (!ErrorMessage.IsEmpty()) return;
+
+	// 게임 진행 중 입장 차단이 꺼져 있으면 통과
+	if (!bBlockJoinWhenGameStarted) return;
+
+	UWorld* World = GetWorld();
+	if (!World || World->GetNetMode() == NM_Standalone)
+	{
+		return; // 단일 플레이어/로컬에서는 차단하지 않음
+	}
+
+	// 현재 맵이 로비 맵인지 확인 (로비가 아니면 = 게임 진행 중 = 입장 거부)
+	FString CurrentMapName = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (CurrentMapName.IsEmpty())
+	{
+		CurrentMapName = World->GetMapName();
+		CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
+	}
+
+	FString LobbyMapBase = LobbyMapPath.IsEmpty()
+		? TEXT("Main_Scene")
+		: FPaths::GetBaseFilename(LobbyMapPath);
+
+	if (!CurrentMapName.Equals(LobbyMapBase, ESearchCase::IgnoreCase))
+	{
+		ErrorMessage = TEXT("게임이 이미 진행 중입니다. 이 방에는 입장할 수 없습니다.");
+		UE_LOG(LogTemp, Warning, TEXT("[PreLogin] 게임 진행 중 입장 차단 (현재 맵: %s, 로비 맵: %s)"), *CurrentMapName, *LobbyMapBase);
+	}
 }
 
 void ABRGameMode::PostLogin(APlayerController* NewPlayer)
@@ -1185,7 +1220,8 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 		{
 			PS->SetPlayerStatus(EPlayerStatus::Dead);
 		}
-
+		// PlayerState를 관전(PlayerIndex 0)으로 변경. bIsSpectatorSlot=true 설정 → GameState는 PS에서 읽어 반영
+		PS->SetSpectator(true);
 		UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 처리 완료"),
 			*PS->GetPlayerName(), PS->TeamNumber);
 	}
@@ -1219,6 +1255,8 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 			{
 				BRPS->SetPlayerStatus(EPlayerStatus::Dead);
 			}
+			// 파트너도 PlayerState를 관전(PlayerIndex 0)으로 변경
+			BRPS->SetSpectator(true);
 			break;
 		}
 	}
@@ -1228,6 +1266,9 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 	GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle_DeathSpectator, TimerDel, 2.0f, false);
 	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 2초 후 하체·상체 관전 전환 예약 (VictimIdx=%d, PartnerIdx=%d)"),
 		PS->TeamNumber, VictimPlayerIndex, PartnerPlayerIndex);
+
+	// 승리 조건 즉시 체크 (타이머에만 의존하지 않음 — 피해자·파트너는 이미 Dead 처리됨)
+	CheckAndEndGameIfWinner();
 }
 
 void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> VictimPC, TWeakObjectPtr<ABRPlayerController> PartnerPC)
@@ -1245,12 +1286,33 @@ void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> Vict
 
 void ABRGameMode::SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, int32 PartnerPlayerIndex)
 {
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 사망 후 2초 타이머 — 관전 전환 시작 (VictimIdx=%d, PartnerIdx=%d). 이 시점부터 PlayerIndex 0 반영됨."), VictimPlayerIndex, PartnerPlayerIndex);
 	ABRGameState* GS = GetGameState<ABRGameState>();
 	if (!GS)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: GameState 없음"));
 		return;
 	}
+
+	// Game state 역할 PlayerIndex(0=관전, 1=하체, 2=상체) 로그 헬퍼
+	auto LogGameStateRolePlayerIndex = [GS](int32 PlayerIndex, const TCHAR* When) -> void
+	{
+		if (PlayerIndex == INDEX_NONE || !GS->PlayerArray.IsValidIndex(PlayerIndex)) return;
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(GS->PlayerArray[PlayerIndex]))
+		{
+			const int32 RolePlayerIndex = BRPS->bIsSpectatorSlot ? 0 : (BRPS->bIsLowerBody ? 1 : 2);
+			UE_LOG(LogTemp, Log, TEXT("[GameState 역할] %s | PlayerArray Index=%d, Name=%s, bIsSpectatorSlot=%s, bIsLowerBody=%s → 역할 PlayerIndex=%d (0=관전,1=하체,2=상체)"),
+				When, PlayerIndex, *BRPS->GetPlayerName(),
+				BRPS->bIsSpectatorSlot ? TEXT("true") : TEXT("false"),
+				BRPS->bIsLowerBody ? TEXT("true") : TEXT("false"),
+				RolePlayerIndex);
+		}
+	};
+
+	// 사망 관전 전환 **전** — 상체/하체 둘 다 Game state 역할 PlayerIndex 확인
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 사망 관전 전환 전 — Game state 역할 PlayerIndex (0=관전, 1=하체, 2=상체)"));
+	LogGameStateRolePlayerIndex(VictimPlayerIndex, TEXT("전(피해자)"));
+	LogGameStateRolePlayerIndex(PartnerPlayerIndex, TEXT("전(파트너)"));
 
 	auto TrySwitchToSpectator = [this, GS](int32 PlayerIndex) -> bool
 	{
@@ -1276,6 +1338,7 @@ void ABRGameMode::SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, 
 			UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환: %s Controller 없음"), *BRPS->GetPlayerName());
 			return false;
 		}
+		// SetSpectator(true)는 OnPlayerDied/파트너 루프에서 이미 호출됨 — 여기서는 시점 전환만
 		PC->StartSpectatingMode();
 		UE_LOG(LogTemp, Log, TEXT("[GameMode] 관전 전환 완료: %s (Index %d)"), *BRPS->GetPlayerName(), PlayerIndex);
 		return true;
@@ -1285,6 +1348,11 @@ void ABRGameMode::SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, 
 	UE_LOG(LogTemp, Log, TEXT("[GameMode] 관전 전환 실행: VictimIndex=%d, PartnerIndex=%d"), VictimPlayerIndex, PartnerPlayerIndex);
 	TrySwitchToSpectator(PartnerPlayerIndex);
 	TrySwitchToSpectator(VictimPlayerIndex);
+
+	// 사망 관전 전환 **후** — 상체/하체 둘 다 Game state 역할 PlayerIndex가 0(관전)으로 바뀌었는지 확인
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 사망 관전 전환 후 — Game state 역할 PlayerIndex (0이면 관전 반영됨)"));
+	LogGameStateRolePlayerIndex(VictimPlayerIndex, TEXT("후(피해자)"));
+	LogGameStateRolePlayerIndex(PartnerPlayerIndex, TEXT("후(파트너)"));
 
 	// 승리 조건 체크: 생존 팀이 1개면 해당 팀 승리
 	CheckAndEndGameIfWinner();
@@ -1307,9 +1375,12 @@ void ABRGameMode::CheckAndEndGameIfWinner()
 		AliveTeamNumbers.Add(BRPS->TeamNumber);
 	}
 
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] CheckAndEndGameIfWinner — 생존 팀 수: %d"), AliveTeamNumbers.Num());
+
 	if (AliveTeamNumbers.Num() == 1)
 	{
 		const int32 WinnerTeam = AliveTeamNumbers.Array()[0];
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 승리 팀 확정 — 팀 %d 승리, EndGameWithWinner 호출"), WinnerTeam);
 		GS->EndGameWithWinner(WinnerTeam);
 		// 승리 확인만 함. 로비 이동은 우승 UI에서 '다음' 버튼 시 TravelToLobby() 호출로 처리 예정.
 	}
