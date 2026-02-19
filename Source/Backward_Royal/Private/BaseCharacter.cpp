@@ -84,6 +84,11 @@ void ABaseCharacter::BeginPlay()
         DefaultWalkSpeed = GetCharacterMovement()->MaxWalkSpeed;
     }
 
+    if (HasAuthority())
+    {
+        CurrentHP = MaxHP;
+    }
+
     UpdateHPUI();
 }
 

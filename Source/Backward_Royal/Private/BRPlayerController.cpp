@@ -407,6 +407,11 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 		}
 	}
 
+	if (IsLocalController() && aPawn->IsA<AUpperBodyPawn>())
+	{
+		ApplyUpperBodyViewAndInput();
+	}
+
 	if (OnPawnChanged.IsBound())
 	{
 		OnPawnChanged.Broadcast(aPawn);
@@ -451,6 +456,15 @@ void ABRPlayerController::ApplyUpperBodyViewAndInput()
 	SetupRoleInput(false); // 상체 IMC 등록
 	SetViewTarget(MyPawn);
 	SetIgnoreMoveInput(true);
+
+	// 로비 UI 조작으로 인한 입력 잠김 해제
+	ResetIgnoreLookInput();
+	SetIgnoreLookInput(false);
+
+	// 입력 모드를 게임 모드로 강제 전환 & 마우스 숨김
+	FInputModeGameOnly GameInputMode;
+	SetInputMode(GameInputMode);
+	bShowMouseCursor = false;
 }
 
 void ABRPlayerController::TryShutdownListenServerForRoomSearch()

@@ -29,6 +29,7 @@
 
 #if WITH_EDITOR
 #include "UObject/SavePackage.h"
+#include "Editor.h"
 #endif
 
 DEFINE_LOG_CATEGORY(LogBRGameInstance);
@@ -64,6 +65,23 @@ void UBRGameInstance::Init() {
           Self->DoPIEExitCleanup(InWorld);
         }
       });
+
+#if WITH_EDITOR
+  // PrePIEEnded는 PIE 종료 시 엔진의 참조 검사(AddReferencedObjects)보다 먼저 호출됨.
+  // 여기서 월드 참조를 끊어주어야 GC Assertion을 방지할 수 있음.
+  PrePIEEndedHandle = FEditorDelegates::PrePIEEnded.AddLambda([Self](bool bIsSimulating) {
+	  if (Self.IsValid())
+	  {
+		  if (UWorld* MyWorld = Self->GetWorld())
+		  {
+			  if (MyWorld->IsPlayInEditor())
+			  {
+				  Self->DoPIEExitCleanup(MyWorld);
+			  }
+		  }
+	  }
+  });
+#endif
 
   // 패킹된 게임에서 Standalone 모드로 시작하는 것을 방지하기 위해
   // 명령줄 인자 확인 (이미 ?listen이 있으면 그대로 사용)
@@ -1062,6 +1080,13 @@ void UBRGameInstance::Shutdown() {
     FWorldDelegates::OnWorldCleanup.Remove(OnWorldCleanupHandle);
     OnWorldCleanupHandle.Reset();
   }
+
+#if WITH_EDITOR
+  if (PrePIEEndedHandle.IsValid()) {
+	  FEditorDelegates::PrePIEEnded.Remove(PrePIEEndedHandle);
+	  PrePIEEndedHandle.Reset();
+  }
+#endif
 
   // PIE 종료 시 모든 PIE 월드에 대해 정리 (GetWorld()만 쓰면 맵 이동 후
   // null/다른 월드일 수 있음)

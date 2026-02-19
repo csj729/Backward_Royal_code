@@ -219,10 +219,10 @@ void ABRPlayerState::OnRep_PartnerPlayerState()
 		UE_LOG(LogTemp, Log, TEXT("[Partner Linked] 나(%s)의 파트너는 %s 입니다."),
 			*GetPlayerName(), *PartnerPlayerState->GetPlayerName());
 
-		// [중요] 파트너가 연결되었으니, 파트너의 커스터마이징 정보 갱신 이벤트를 다시 구독해야 함
+		// 파트너가 연결되었으니, 파트너의 커스터마이징 정보 갱신 이벤트를 다시 구독해야 함
 		// 기존 구독 해제 후 재구독 (중복 방지)
 		PartnerPlayerState->OnCustomizationDataChanged.RemoveDynamic(this, &ABRPlayerState::OnRep_CustomizationData);
-		// (필요하다면 여기서 내 캐릭터에게 알림)
+		PartnerPlayerState->OnCustomizationDataChanged.AddDynamic(this, &ABRPlayerState::OnRep_CustomizationData);
 	}
 
 	// 캐릭터에게 커마 다시 적용하라고 알림

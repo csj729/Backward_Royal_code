@@ -380,6 +380,8 @@ void APlayerCharacter::OnRep_PlayerState()
 			BindToPartnerPlayerState(MyPS->bIsLowerBody);
 		}
 	}
+
+	UpdateHPUI();
 }
 
 // 상체 플레이어 찾기 (포인터 우선)
