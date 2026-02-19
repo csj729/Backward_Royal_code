@@ -2073,6 +2073,7 @@ void ABRPlayerController::ShowMenuWidget(TSubclassOf<UUserWidget> WidgetClass)
 
 void ABRPlayerController::SubmitCustomizationToServer()
 {
+	GetWorldTimerManager().ClearTimer(TimerHandle_RetrySubmitCustomization);
 	// 1. PlayerState 확인
 	ABRPlayerState* PS = GetPlayerState<ABRPlayerState>();
 	if (!PS)
