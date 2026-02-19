@@ -142,10 +142,37 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Customization")
     void SetArmorColor(EArmorSlot Slot, FLinearColor Color);
 
+    // --- Stun System ---
+    UPROPERTY(Replicated, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+    bool bIsStunned = false;
+
+    // 스턴 지속 시간 (인스펙터에서 수정 가능)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Status")
+    float StunDuration = 3.0f;
+
+    void EnterStunState();
+    void RecoverFromStun();
+
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastEnterStunState();
+
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastRecoverFromStun();
+
+    // 스턴 상태에 진입할 때 블루프린트에서 실행될 이벤트
+    UFUNCTION(BlueprintImplementableEvent, Category = "Status|Stun")
+    void OnEnterStunState();
+
+    // 스턴 상태에서 회복될 때 블루프린트에서 실행될 이벤트
+    UFUNCTION(BlueprintImplementableEvent, Category = "Status|Stun")
+    void OnRecoverFromStun();
+
 protected:
     bool bIsCharacterAttacking = false;
 
     UFUNCTION(BlueprintCallable, Category = "Status")
     bool IsDead() const;
+
+    FTimerHandle StunTimerHandle;
 
 };

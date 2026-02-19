@@ -42,8 +42,8 @@ public:
 	TArray<FString> StageMapPathsFallback = { 
 		//TEXT("/Game/Main/Level/Stage/Stage01_Temple"),
 		//TEXT("/Game/Main/Level/Stage/Stage02_Bushes"),
-		TEXT("/Game/Main/Level/Stage/Stage03_Arena"),
-		//TEXT("/Game/Main/Level/Stage/Stage04_Race") 
+		//TEXT("/Game/Main/Level/Stage/Stage03_Arena"),
+		TEXT("/Game/Main/Level/Stage/Stage04_Race") 
 		};
 
 	// 랜덤 맵 선택 사용 여부
@@ -102,6 +102,10 @@ public:
 	/** 승리 후 로비 이동 전 대기 시간(초). 0이면 즉시 이동 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings", meta = (ClampMin = "0.0", ClampMax = "10.0"))
 	float DelayBeforeReturnToLobby = 2.0f;
+
+	// 체력이 0이 되었을 때 사망 대신 스턴 상태를 사용할지 여부 (BP_RaceGameMode에서 True로 설정)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Game Settings|Rules")
+	bool bUseStunInsteadOfDeath = false;
 
 protected:
 	virtual void BeginPlay() override;

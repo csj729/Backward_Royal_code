@@ -39,6 +39,18 @@ void ABRGameSession::BeginPlay()
 	{
 		return;
 	}
+
+	// 로비 맵(Main_Scene)에서 시작한 경우 "시작한 방 제외" 플래그 해제. Stage 맵을 바로 연 경우 클라이언트가 방 목록에서 서버 방을 볼 수 있도록.
+	FString LevelName = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (LevelName.IsEmpty())
+	{
+		LevelName = World->GetMapName();
+		LevelName.RemoveFromStart(World->StreamingLevelsPrefix);
+	}
+	if (LevelName.Contains(TEXT("Main_Scene")))
+	{
+		BRGI->SetExcludeOwnSessionFromSearch(false);
+	}
 	
 	FString RoomName = BRGI->GetPendingRoomName();
 	if (RoomName.IsEmpty() || HasActiveSession())
@@ -371,6 +383,8 @@ void ABRGameSession::CreateRoomSession(const FString& RoomName)
 	// 세션 이름 설정
 	FString SessionNameStr = RoomName.IsEmpty() ? TEXT("이름 없는 방") : RoomName;
 	SessionSettings->Set(FName(TEXT("SESSION_NAME")), SessionNameStr, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+	// 방 생성 시 서버장(호스트)이 이미 있으므로 현재 인원 1로 시작 (방 찾기에서 0이 아닌 1부터 표시)
+	SessionSettings->Set(FName(TEXT("CURRENT_PLAYER_COUNT")), 1, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 	
 	// NGDA 스타일: CreateSession 호출 (NetMode 체크 없음 - Steam OSS가 자동으로 ListenServer 처리)
 	int32 LocalUserNum = 0;
@@ -646,6 +660,35 @@ void ABRGameSession::OnFindSessionsCompleteDelegate(bool bWasSuccessful)
 	if (bWasSuccessful && SessionSearch.IsValid())
 	{
 		Results = SessionSearch->SearchResults;
+
+		// 시작한 방 제외: 호스트이고, WBP_Start로 게임맵에 들어간 뒤일 때만 적용 (로비에 있을 때는 PIE 클라이언트가 방 목록에 보이도록)
+		UWorld* World = GetWorld();
+		const bool bAmHost = World && (World->GetNetMode() == NM_ListenServer || World->GetNetMode() == NM_DedicatedServer);
+		UBRGameInstance* BRGI = World ? Cast<UBRGameInstance>(World->GetGameInstance()) : nullptr;
+		const bool bExcludeOwn = bAmHost && BRGI && BRGI->GetExcludeOwnSessionFromSearch();
+		if (bExcludeOwn)
+		{
+			const FNamedOnlineSession* LocalSession = SessionInterface->GetNamedSession(NAME_GameSession);
+			if (LocalSession)
+			{
+				FString LocalSessionId = LocalSession->GetSessionIdStr();
+				int32 Removed = 0;
+				for (int32 i = SessionSearch->SearchResults.Num() - 1; i >= 0; --i)
+				{
+					if (SessionSearch->SearchResults[i].Session.GetSessionIdStr() == LocalSessionId)
+					{
+						SessionSearch->SearchResults.RemoveAt(i);
+						Removed++;
+					}
+				}
+				if (Removed > 0)
+				{
+					UE_LOG(LogTemp, Log, TEXT("[방 찾기] 자신이 호스팅 중인 세션 %d개를 검색 결과에서 제외 (게임맵 이동 후)"), Removed);
+				}
+				Results = SessionSearch->SearchResults;
+			}
+		}
+
 		UE_LOG(LogTemp, Warning, TEXT("[방 찾기] 완료: %d개 세션 발견"), Results.Num());
 		
 		// 0건일 때 Steam/Null 모두 최대 2회 자동 재검색 (한번 호스트였던 경우 OSS 지연 대응)
@@ -660,7 +703,7 @@ void ABRGameSession::OnFindSessionsCompleteDelegate(bool bWasSuccessful)
 			{
 				FindSessionsRetryCount++;
 				UE_LOG(LogTemp, Warning, TEXT("[방 찾기] 세션 0건. 2초 후 재검색 (%d/%d) [OSS=%s]"), FindSessionsRetryCount, MaxFindSessionsRetries, *SubsystemName);
-				if (UWorld* World = GetWorld())
+				if (World)
 				{
 					World->GetTimerManager().SetTimer(FindSessionsRetryHandle, this, &ABRGameSession::FindSessionsRetryCallback, 2.0f, false);
 				}
@@ -753,6 +796,14 @@ int32 ABRGameSession::GetSessionCurrentPlayers(int32 SessionIndex) const
 		return 0;
 	}
 	const FOnlineSessionSearchResult& Result = SessionSearch->SearchResults[SessionIndex];
+	// 호스트가 UpdateSessionPlayerCount로 설정한 현재 인원을 우선 사용 (일부 OSS는 NumOpenPublicConnections를 갱신하지 않아 0으로 나올 수 있음)
+	int32 AdvertisedCount = 0;
+	if (Result.Session.SessionSettings.Get(FName(TEXT("CURRENT_PLAYER_COUNT")), AdvertisedCount) && AdvertisedCount >= 0)
+	{
+		int32 Max = Result.Session.SessionSettings.NumPublicConnections;
+		return FMath::Clamp(AdvertisedCount, 0, Max);
+	}
+	// 폴백: 최대 - 빈 슬롯
 	int32 Max = Result.Session.SessionSettings.NumPublicConnections;
 	int32 Open = Result.Session.NumOpenPublicConnections;
 	return FMath::Max(0, Max - Open);

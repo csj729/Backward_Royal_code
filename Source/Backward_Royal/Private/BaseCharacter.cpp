@@ -157,6 +157,8 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 // [신규] 공격 요청 처리 함수
 void ABaseCharacter::RequestAttack()
 {
+    if (bIsStunned || IsDead()) return;
+
     // 1. 무기를 들고 있는 경우
     if (CurrentWeapon)
     {
@@ -261,6 +263,7 @@ void ABaseCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
     DOREPLIFETIME(ABaseCharacter, CurrentHP);
     DOREPLIFETIME(ABaseCharacter, CurrentWeapon);
     DOREPLIFETIME(ABaseCharacter, LastDeathInfo);
+    DOREPLIFETIME(ABaseCharacter, bIsStunned);
 }
 
 bool ABaseCharacter::IsDead() const
@@ -281,8 +284,8 @@ void ABaseCharacter::SetLastHitInfo(FVector Impulse, FVector HitLocation)
 
 float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageEvent, AController* EventInstigator, AActor* DamageCauser)
 {
-    // 이미 사망 상태면 데미지 무시 (EPlayerStatus 체크)
-    if (IsDead()) return 0.0f;
+    // 이미 사망 상태이거나 스턴 상태면 데미지 무시
+    if (IsDead() || bIsStunned) return 0.0f;
 
     float ActualDamage = Super::TakeDamage(DamageAmount, DamageEvent, EventInstigator, DamageCauser);
     CurrentHP = FMath::Clamp(CurrentHP - ActualDamage, 0.0f, MaxHP);
@@ -291,8 +294,22 @@ float ABaseCharacter::TakeDamage(float DamageAmount, FDamageEvent const& DamageE
 
     if (CurrentHP <= 0.0f)
     {
-        // 저장해둔 LastDeathInfo의 값을 인자로 직접 전달하여 호출
-        Die(LastDeathInfo.Impulse, LastDeathInfo.HitLocation);
+        bool bUseStun = false;
+        if (ABRGameMode* GM = GetWorld()->GetAuthGameMode<ABRGameMode>())
+        {
+            // 현재 게임모드가 스턴 규칙을 사용하는지 확인
+            bUseStun = GM->bUseStunInsteadOfDeath;
+        }
+
+        if (bUseStun)
+        {
+            EnterStunState(); // 사망 대신 스턴 진입
+        }
+        else
+        {
+            // 기존 배틀로얄 데스 로직
+            Die(LastDeathInfo.Impulse, LastDeathInfo.HitLocation);
+        }
     }
 
     return ActualDamage;
@@ -485,4 +502,72 @@ void ABaseCharacter::EnhancePhysics(bool bEnable)
 void ABaseCharacter::HandleWeaponBroken()
 {
     CurrentWeapon = nullptr;
+}
+
+void ABaseCharacter::EnterStunState()
+{
+    if (bIsStunned || !HasAuthority()) return;
+
+    bIsStunned = true;
+
+    // 모든 클라이언트에 스턴 효과 및 조작 불가 적용
+    MulticastEnterStunState();
+
+    // StunDuration 초 후에 RecoverFromStun 함수 실행
+    GetWorld()->GetTimerManager().SetTimer(StunTimerHandle, this, &ABaseCharacter::RecoverFromStun, StunDuration, false);
+
+    CHAR_LOG(Log, TEXT("Player Entered Stun State"));
+}
+
+void ABaseCharacter::MulticastEnterStunState_Implementation()
+{
+    // 캐릭터 이동 완전 정지 및 비활성화
+    if (GetCharacterMovement())
+    {
+        GetCharacterMovement()->StopMovementImmediately();
+        GetCharacterMovement()->DisableMovement();
+    }
+
+    // 컨트롤러의 입력 비활성화 (로컬 조작 방지)
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        DisableInput(PC);
+    }
+
+    // 블루프린트 이벤트 호출 (모든 클라이언트에서 실행됨)
+    OnEnterStunState();
+}
+
+void ABaseCharacter::RecoverFromStun()
+{
+    if (!HasAuthority()) return;
+
+    bIsStunned = false;
+
+    // 체력을 최대로 회복시키고 UI 업데이트
+    CurrentHP = MaxHP;
+    UpdateHPUI();
+
+    // 모든 클라이언트에 조작 복구 적용
+    MulticastRecoverFromStun();
+
+    CHAR_LOG(Log, TEXT("Player Recovered From Stun"));
+}
+
+void ABaseCharacter::MulticastRecoverFromStun_Implementation()
+{
+    // 캐릭터 이동 다시 활성화
+    if (GetCharacterMovement())
+    {
+        GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+    }
+
+    // 컨트롤러 입력 다시 활성화
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        EnableInput(PC);
+    }
+
+    // 블루프린트 이벤트 호출 (모든 클라이언트에서 실행됨)
+    OnRecoverFromStun();
 }

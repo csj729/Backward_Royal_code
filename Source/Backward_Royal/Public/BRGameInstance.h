@@ -133,6 +133,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Session|Match")
 	bool GetDidCreateRoomThenTravel() const { return bDidCreateRoomThenTravel; }
 
+	/** WBP_Start로 게임맵 이동 후에만 true. 방 찾기 시 "시작한 방 제외"는 이 값이 true일 때만 적용(호스트인 경우). 로비로 돌아오면 false로 리셋. */
+	UFUNCTION(BlueprintCallable, Category = "Session|Match", meta = (DisplayName = "Set Exclude Own Session From Search"))
+	void SetExcludeOwnSessionFromSearch(bool bExclude) { bExcludeOwnSessionFromSearch = bExclude; }
+
+	UFUNCTION(BlueprintCallable, Category = "Session|Match", meta = (DisplayName = "Get Exclude Own Session From Search"))
+	bool GetExcludeOwnSessionFromSearch() const { return bExcludeOwnSessionFromSearch; }
+
 	/** 방 생성 시 방 이름 저장 (맵 재로드 후 세션 재생성용) */
 	UFUNCTION(BlueprintCallable, Category = "Session|Match")
 	void SetPendingRoomName(const FString& RoomName) { PendingRoomName = RoomName; }
@@ -210,6 +217,9 @@ protected:
 
 	/** 방 생성 후 ServerTravel 호출 직전에 true 설정. BeginPlay에서 로비 표시 여부 판단에 사용. */
 	bool bDidCreateRoomThenTravel = false;
+
+	/** true면 방 찾기 시 자신이 호스팅 중인 세션을 검색 결과에서 제외. StartGame()으로 게임맵 이동 시 true, TravelToLobby() 시 false. */
+	bool bExcludeOwnSessionFromSearch = false;
 
 	/** 방 생성 시 방 이름 저장 (맵 재로드 후 세션 재생성용) */
 	FString PendingRoomName;

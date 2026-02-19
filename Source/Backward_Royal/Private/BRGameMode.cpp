@@ -168,7 +168,7 @@ void ABRGameMode::PreLogin(const FString& Options, const FString& Address, const
 		return; // 단일 플레이어/로컬에서는 차단하지 않음
 	}
 
-	// 현재 맵이 로비 맵인지 확인 (로비가 아니면 = 게임 진행 중 = 입장 거부)
+	// 현재 맵이 로비 맵이면 항상 입장 허용
 	FString CurrentMapName = UGameplayStatics::GetCurrentLevelName(World, true);
 	if (CurrentMapName.IsEmpty())
 	{
@@ -180,7 +180,14 @@ void ABRGameMode::PreLogin(const FString& Options, const FString& Address, const
 		? TEXT("Main_Scene")
 		: FPaths::GetBaseFilename(LobbyMapPath);
 
-	if (!CurrentMapName.Equals(LobbyMapBase, ESearchCase::IgnoreCase))
+	if (CurrentMapName.Equals(LobbyMapBase, ESearchCase::IgnoreCase))
+	{
+		return; // 로비 맵이면 입장 허용
+	}
+
+	// 로비가 아닌 맵(Stage 등)인 경우: WBP_Start로 게임맵에 들어간 경우에만 입장 차단. Stage 맵을 바로 연 경우에는 입장 허용.
+	UBRGameInstance* BRGI = Cast<UBRGameInstance>(World->GetGameInstance());
+	if (BRGI && BRGI->GetExcludeOwnSessionFromSearch())
 	{
 		ErrorMessage = TEXT("게임이 이미 진행 중입니다. 이 방에는 입장할 수 없습니다.");
 		UE_LOG(LogTemp, Warning, TEXT("[PreLogin] 게임 진행 중 입장 차단 (현재 맵: %s, 로비 맵: %s)"), *CurrentMapName, *LobbyMapBase);
@@ -1080,6 +1087,8 @@ void ABRGameMode::StartGame()
 			GI->SetPendingApplyRandomTeamRoles(true);  // 랜덤이 아니어도 로비 역할(1P=하체, 2P=상체) 적용을 위해 플래그 설정
 			UE_LOG(LogTemp, Warning, TEXT("[게임 시작] Travel 직전 역할 저장 완료 (GameMode), 게임 맵에서 상체/하체 적용 예정"));
 		}
+		// WBP_Start로 게임맵 이동 시에만 방 찾기에서 "시작한 방 제외" 적용 (로비에 있을 때는 클라이언트가 방 목록에 보이도록)
+		GI->SetExcludeOwnSessionFromSearch(true);
 	}
 	
 	// PIE(Play In Editor) 환경 감지
@@ -1395,6 +1404,12 @@ void ABRGameMode::TravelToLobby()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[게임 종료] 로비 이동 스킵: World 없음"));
 		return;
+	}
+
+	// 로비로 돌아가면 "시작한 방 제외" 플래그 해제 (다시 방 찾기 시 자신의 방이 목록에 보이도록)
+	if (UBRGameInstance* GI = Cast<UBRGameInstance>(World->GetGameInstance()))
+	{
+		GI->SetExcludeOwnSessionFromSearch(false);
 	}
 
 	// LobbyMapPath가 블루프린트에서 비어 있으면 기본 로비 맵 사용 (BP_MainGameMode에서 미설정 시)
