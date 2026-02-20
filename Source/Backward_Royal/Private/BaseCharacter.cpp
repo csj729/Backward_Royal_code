@@ -157,7 +157,7 @@ void ABaseCharacter::EquipWeapon(ABaseWeapon* NewWeapon)
 // [신규] 공격 요청 처리 함수
 void ABaseCharacter::RequestAttack()
 {
-    if (bIsStunned || IsDead()) return;
+    if (bIsStunned || CurrentHP <= 0.0f || IsDead()) return;
 
     // 1. 무기를 들고 있는 경우
     if (CurrentWeapon)
@@ -342,7 +342,7 @@ void ABaseCharacter::Die(FVector KillImpulse, FVector HitLocation)
     }
 }
 
-void ABaseCharacter::PerformDeathVisuals()
+void ABaseCharacter::PerformDeathVisuals_Implementation()
 {
     // 이미 물리 시뮬레이션 중이라면 중복 실행 방지
     if (GetMesh()->IsSimulatingPhysics()) return;
@@ -355,8 +355,35 @@ void ABaseCharacter::PerformDeathVisuals()
 
     CHAR_LOG(Warning, TEXT("PerformDeathVisuals Executed - Impulse: %s"), *Impulse.ToString());
 
-    // [중요] 이동 동기화 해제
+    // [중요] 이동 동기화 해제 (서버와 클라이언트 연결 고리 끊기)
     SetReplicateMovement(false);
+
+    // ==========================================
+    // [핵심] 하체 및 부착된 상체의 조작 완전 차단 (멀티캐스트로 각 클라이언트 로컬에서 실행)
+    // ==========================================
+    // 1. 하체(자신)의 조작 비활성화
+    if (APlayerController* PC = Cast<APlayerController>(GetController()))
+    {
+        DisableInput(PC);
+    }
+
+    // 2. 자신에게 부착된 상체(UpperBody) 폰을 찾아 조작 및 애니메이션 비활성화
+    TArray<AActor*> AttachedActors;
+    GetAttachedActors(AttachedActors);
+    for (AActor* Actor : AttachedActors)
+    {
+        if (APawn* AttachedPawn = Cast<APawn>(Actor))
+        {
+            // 상체 폰의 입력을 제거하여 로컬(클라이언트)에서의 공격/시점 회전 완전 차단
+            if (APlayerController* UpperPC = Cast<APlayerController>(AttachedPawn->GetController()))
+            {
+                AttachedPawn->DisableInput(UpperPC);
+            }
+            // 상체 폰의 Tick을 꺼서 회전 및 애니메이션 업데이트 완전 정지
+            AttachedPawn->SetActorTickEnabled(false);
+        }
+    }
+    // ==========================================
 
     // 1. 위치 싱크 (오차 보정)
     if (!HasAuthority() && FVector::DistSquared(GetActorLocation(), ServerLoc) < 250000.0f)
@@ -393,7 +420,7 @@ void ABaseCharacter::PerformDeathVisuals()
         GetMesh()->SetSimulatePhysics(true);
         GetMesh()->WakeAllRigidBodies();
 
-        // 4. 충격량 적용 (기존 로직 복원)
+        // 4. 충격량 적용
         if (GetMesh()->IsSimulatingPhysics() && !Impulse.IsNearlyZero())
         {
             if (!HitLocation.IsNearlyZero())
@@ -411,12 +438,6 @@ void ABaseCharacter::PerformDeathVisuals()
             else
             {
                 GetMesh()->AddImpulse(Impulse);
-            }
-
-            // 디버깅
-            if (GEngine)
-            {
-                GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Red, FString::Printf(TEXT("Ragdoll Impulse: %.1f"), Impulse.Size()));
             }
         }
     }

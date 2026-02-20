@@ -144,9 +144,8 @@ protected:
 private:
 	FTimerHandle TimerHandle_RetryBindPartner;
 
-	// 상체/하체 적용 완료 여부 플래그 (중복 적용 방지)
-	bool bUpperBodyApplied = false;
-	bool bLowerBodyApplied = false;
+	// 최초 외형 세팅 완료 후 영구 잠금하기 위한 플래그
+	bool bAppearanceLocked = false;
 
 	// 파트너 PlayerState에 바인딩했는지 체크
 	bool bBoundToPartner = false;

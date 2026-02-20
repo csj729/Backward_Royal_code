@@ -122,7 +122,7 @@ public:
     UPROPERTY(Replicated, BlueprintReadOnly, Category = "Status")
     FDeathDamageInfo LastDeathInfo;
 
-    // [수정] 인자 없이 내부 변수(LastDeathInfo)를 사용하여 처리
+    UFUNCTION(NetMulticast, Reliable)
     void PerformDeathVisuals();
 
     // --- Weapon ---
@@ -174,5 +174,5 @@ protected:
     bool IsDead() const;
 
     FTimerHandle StunTimerHandle;
-
+    FTimerHandle PhysicsReactionTimerHandle;
 };

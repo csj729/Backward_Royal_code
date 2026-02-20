@@ -40,10 +40,11 @@ public:
 	/** Stage 맵 목록 (폴백용). Stage 폴더 자동 수집이 실패할 때만 사용됩니다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Game Settings")
 	TArray<FString> StageMapPathsFallback = { 
-		//TEXT("/Game/Main/Level/Stage/Stage01_Temple"),
-		//TEXT("/Game/Main/Level/Stage/Stage02_Bushes"),
-		//TEXT("/Game/Main/Level/Stage/Stage03_Arena"),
-		TEXT("/Game/Main/Level/Stage/Stage04_Race") 
+		TEXT("/Game/Main/Level/Stage/Stage01_Temple"),
+		TEXT("/Game/Main/Level/Stage/Stage02_Bushes"),
+		TEXT("/Game/Main/Level/Stage/Stage03_Arena"),
+		TEXT("/Game/Main/Level/Stage/Stage04_Race")
+		TEXT("/Game/Main/Level/Stage/Stage05_Lament")
 		};
 
 	// 랜덤 맵 선택 사용 여부

@@ -43,8 +43,10 @@ AUpperBodyPawn::AUpperBodyPawn()
 	FrontCameraBoom->bInheritYaw = true;
 	FrontCameraBoom->bInheritRoll = false;
 
-	FrontCameraBoom->bEnableCameraLag = false;
-	FrontCameraBoom->bEnableCameraRotationLag = false;
+	FrontCameraBoom->bEnableCameraLag = true;           // 이동 지연 켜기
+	FrontCameraBoom->CameraLagSpeed = 20.0f;            // 이동 지연 속도
+	FrontCameraBoom->bEnableCameraRotationLag = true;   // 회전 지연 켜기 (끌려갈 때 부드럽게)
+	FrontCameraBoom->CameraRotationLagSpeed = 15.0f;    // 수치가 작을수록 더 부드럽고 늦게 따라감
 
 	FrontCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FrontCamera"));
 	FrontCamera->SetupAttachment(FrontCameraBoom);

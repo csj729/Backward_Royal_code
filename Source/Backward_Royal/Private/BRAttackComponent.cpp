@@ -10,6 +10,7 @@
 DEFINE_LOG_CATEGORY(LogAttackComp);
 
 // 기본 펀치 데미지 전역 변수
+
 float UBRAttackComponent::BasePunchDamage = 10.f;
 
 UBRAttackComponent::UBRAttackComponent()
@@ -37,6 +38,12 @@ void UBRAttackComponent::SetAttackDetection(bool bEnabled)
     if (!GetOwner()->HasAuthority())
     {
         ServerSetAttackDetection(bEnabled);
+    }
+
+    // 공격이 새로 시작될 때마다 피격 액터 목록을 초기화하여 여러 번 휘두를 때 정상 타격되도록 보정
+    if (bEnabled)
+    {
+        HitActors.Empty();
     }
 
     // 1. 무기 공격 설정
@@ -141,8 +148,7 @@ void UBRAttackComponent::ResetHitStop()
         // 1. 시간 속도 정상 복구
         OwnerChar->CustomTimeDilation = 1.0f;
 
-        // 2. [요청 사항] 공격 애니메이션 강제 종료 (Idle 복귀)
-        // 0.25초 정도의 블렌드 아웃 시간을 주어 부드럽게 돌아가도록 StopAnimMontage 사용
+        // 2. 공격 애니메이션 강제 종료 (Idle 복귀)
         OwnerChar->StopAnimMontage();
     }
 }
@@ -177,8 +183,8 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
 
     if (HitActors.Contains(OtherActor)) return;
 
-    // [충격량 계산]
-    float ImpactForce = NormalImpulse.Size();
+    // [수정] 피지컬 애니메이션 적용 시 무기 충돌 반발력이 수십만 단위로 폭증하여 무기가 즉시 파괴되는 현상 방지를 위해 제한(Clamp)
+    float ImpactForce = FMath::Clamp(NormalImpulse.Size(), 0.0f, 5000.0f);
     float ImpulseMultiplier = 1.0f;
 
     if (MyWeapon)
@@ -207,6 +213,7 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     }
     else
     {
+        // [수정] 맨손 공격 시 기본 데미지 10 추가
         CalculatedDamage = (ImpactForce * 0.001f) + BasePunchDamage;
     }
 
@@ -234,12 +241,31 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     // 공격 성공 시 히트 스탑 적용 (0.1초 멈춤 -> 이후 애니메이션 종료)
     MulticastApplyHitStop(0.1f);
 
-    // 캐릭터 외 물체 물리 적용
-    if (GetOwner()->HasAuthority() && OtherComp && OtherComp->IsSimulatingPhysics())
+    // 피지컬 애니메이션에 충격량 명시적 전달
+    if (GetOwner()->HasAuthority())
     {
-        if (!Cast<ABaseCharacter>(OtherActor))
+        if (ABaseCharacter* VictimChar = Cast<ABaseCharacter>(OtherActor))
         {
-            OtherComp->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint);
+            // 타겟 캐릭터의 피지컬 애니메이션이 활성화된 메쉬를 가져옵니다.
+            if (USkeletalMeshComponent* VictimMesh = VictimChar->GetMesh())
+            {
+                FName HitBone = Hit.BoneName;
+
+                // 무기가 단단한 캡슐 컴포넌트에 맞았을 경우 특정 뼈 이름(NAME_None)이 없으므로,
+                // 맞은 위치(ImpactPoint)에서 가장 가까운 본을 찾아 충격을 전달합니다.
+                if (HitBone == NAME_None)
+                {
+                    HitBone = VictimMesh->FindClosestBone(Hit.ImpactPoint);
+                }
+
+                // 메쉬에 직접 물리적 반발력을 주입하면 피지컬 애니메이션이 반응하여 몸이 흔들립니다.
+                VictimMesh->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, HitBone);
+            }
+        }
+        // 캐릭터 외 일반 물리 시뮬레이션 물체 처리
+        else if (OtherComp && OtherComp->IsSimulatingPhysics())
+        {
+            OtherComp->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, Hit.BoneName);
         }
     }
 
