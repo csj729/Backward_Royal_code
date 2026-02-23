@@ -37,10 +37,20 @@ void ABRPlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	DOREPLIFETIME(ABRPlayerState, CurrentStatus);
 }
 
+// 서버 보안: 커스텀 부위 ID 허용 범위 (비정상 패킷 방지)
+static constexpr int32 MinCustomizationID = 0;
+static constexpr int32 MaxCustomizationID = 999;
+
 void ABRPlayerState::ServerSetCustomizationData_Implementation(const FBRCustomizationData& NewData)
 {
-	CustomizationData = NewData;
-	// 서버에서도 적용이 필요하면 여기서 델리게이트를 호출하거나 로직 수행
+	FBRCustomizationData Safe;
+	Safe.HeadID = FMath::Clamp(NewData.HeadID, MinCustomizationID, MaxCustomizationID);
+	Safe.ChestID = FMath::Clamp(NewData.ChestID, MinCustomizationID, MaxCustomizationID);
+	Safe.HandID = FMath::Clamp(NewData.HandID, MinCustomizationID, MaxCustomizationID);
+	Safe.LegID = FMath::Clamp(NewData.LegID, MinCustomizationID, MaxCustomizationID);
+	Safe.FootID = FMath::Clamp(NewData.FootID, MinCustomizationID, MaxCustomizationID);
+	Safe.bIsDataValid = NewData.bIsDataValid;
+	CustomizationData = Safe;
 	OnRep_CustomizationData();
 }
 

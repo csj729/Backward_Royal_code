@@ -38,6 +38,7 @@ void ABRGameState::BeginPlay()
 
 void ABRGameState::UpdatePlayerList()
 {
+	QUICK_SCOPE_CYCLE_COUNTER(STAT_BR_UpdatePlayerList);
 	if (HasAuthority())
 	{
 		int32 OldCount = PlayerCount;

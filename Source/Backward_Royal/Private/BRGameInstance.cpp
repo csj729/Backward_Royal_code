@@ -6,6 +6,7 @@
 #include "BRGameState.h"
 #include "BRPlayerController.h"
 #include "BRPlayerState.h"
+#include "BRSaveGame.h"
 #include "BaseWeapon.h"
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
@@ -54,6 +55,8 @@ void UBRGameInstance::Init() {
 
   // S_UserInfo 에셋에서 PlayerName 로드
   LoadPlayerNameFromUserInfo();
+  // 로컬 슬롯에 저장된 설정이 있으면 복원 (데이터 보존)
+  LoadPlayerSettingsFromSlot();
 
   // PIE 월드 클린업이 엔진의 '월드 참조 검사'보다 먼저 일어나게 등록.
   // Shutdown에서 Remove.
@@ -1106,7 +1109,57 @@ void UBRGameInstance::Shutdown() {
     DoPIEExitCleanup(CurrentWorld);
   }
 
+  // 종료 전 플레이어 이름·커스텀 보존 (Alt+F4 등 강제 종료 시에도 가능한 한 저장 시도)
+  SavePlayerSettingsToSlot();
+
   Super::Shutdown();
+}
+
+static const FString PlayerSettingsSlotName = TEXT("PlayerSettings");
+static const int32 PlayerSettingsUserIndex = 0;
+
+void UBRGameInstance::SetPlayerName(const FString& NewPlayerName)
+{
+  PlayerName = NewPlayerName;
+  SavePlayerSettingsToSlot();
+}
+
+void UBRGameInstance::SavePlayerSettingsToSlot()
+{
+  UBRPlayerSettingsSaveGame* Save = Cast<UBRPlayerSettingsSaveGame>(
+      UGameplayStatics::CreateSaveGameObject(UBRPlayerSettingsSaveGame::StaticClass()));
+  if (!Save) return;
+  Save->SavedPlayerName = PlayerName;
+  Save->SavedCustomization = LocalCustomizationData;
+  Save->SavedUserUID = UserUID;
+  if (UGameplayStatics::SaveGameToSlot(Save, PlayerSettingsSlotName, PlayerSettingsUserIndex))
+  {
+    UE_LOG(LogBRGameInstance, Log, TEXT("플레이어 설정 저장: 이름='%s'"), *PlayerName);
+  }
+}
+
+void UBRGameInstance::LoadPlayerSettingsFromSlot()
+{
+  if (!UGameplayStatics::DoesSaveGameExist(PlayerSettingsSlotName, PlayerSettingsUserIndex))
+  {
+    return;
+  }
+  UBRPlayerSettingsSaveGame* Loaded = Cast<UBRPlayerSettingsSaveGame>(
+      UGameplayStatics::LoadGameFromSlot(PlayerSettingsSlotName, PlayerSettingsUserIndex));
+  if (!Loaded) return;
+  if (!Loaded->SavedPlayerName.IsEmpty())
+  {
+    PlayerName = Loaded->SavedPlayerName;
+    UE_LOG(LogBRGameInstance, Log, TEXT("플레이어 설정 로드: 이름='%s'"), *PlayerName);
+  }
+  if (Loaded->SavedCustomization.bIsDataValid)
+  {
+    LocalCustomizationData = Loaded->SavedCustomization;
+  }
+  if (!Loaded->SavedUserUID.IsEmpty())
+  {
+    UserUID = Loaded->SavedUserUID;
+  }
 }
 
 void UBRGameInstance::LoadPlayerNameFromUserInfo() {
@@ -1188,4 +1241,5 @@ void UBRGameInstance::SaveCustomization(const FBRCustomizationData &NewData)
     UE_LOG(LogBRGameInstance, Log,
             TEXT("Local Customization Saved: Head(%d), Leg(%d)"), NewData.HeadID,
             NewData.LegID);
+    SavePlayerSettingsToSlot();
 }

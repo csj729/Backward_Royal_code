@@ -95,7 +95,7 @@ public:
 	FString GetPlayerName() const { return PlayerName; }
 
 	UFUNCTION(BlueprintCallable, Category = "Player")
-	void SetPlayerName(const FString& NewPlayerName) { PlayerName = NewPlayerName; }
+	void SetPlayerName(const FString& NewPlayerName);
 
 	/** 세션 동안 유지되는 UserUID (방 입장/게임 시작 시 초기화 방지) */
 	UPROPERTY(BlueprintReadWrite, Category = "Player")
@@ -109,6 +109,11 @@ public:
 
 	/** S_UserInfo 에셋에서 PlayerName 로드 */
 	void LoadPlayerNameFromUserInfo();
+
+	/** 로컬 슬롯에 플레이어 이름·커스텀 저장 (강제 종료/재실행 후 복원용) */
+	void SavePlayerSettingsToSlot();
+	/** 로컬 슬롯에서 플레이어 설정 로드. Init 시 호출. */
+	void LoadPlayerSettingsFromSlot();
 
 	// LAN 전용(true) / 인터넷(Steam) 매칭(false). 방 생성·방 찾기 시 사용.
 	// 기본값: false (인터넷 매칭) - Steam을 통한 인터넷 매칭 사용

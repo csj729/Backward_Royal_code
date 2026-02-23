@@ -6,6 +6,7 @@
 #include "Components/CapsuleComponent.h"
 #include "BRAttackComponent.h"
 #include "UpperBodyPawn.h"
+#include "BRPlayerController.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicalAnimationComponent.h"
 #include "BRPlayerState.h"

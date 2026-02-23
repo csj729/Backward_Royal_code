@@ -64,10 +64,18 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnGameEndedWithWinner OnGameEndedWithWinner;
 
-	/** 매치 종료 시 브로드캐스트 (승리 위치, 상체 플레이어 이름, 하체 플레이어 이름). MulticastMatchEnded에서 사용 */
+	/** 매치 종료 시 브로드캐스트 (승리 위치, 상체 플레이어 이름, 하체 플레이어 이름). MulticastMatchEnded에서 사용
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnMatchEnded OnMatchEnded; */
+	
+	// 매치 종료(우승 팀 결정) 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnMatchEnded OnMatchEnded;
 
+	// [서버->클라이언트] 매치 종료 이벤트를 모든 클라이언트에게 전파
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastMatchEnded(FVector WinnerLocation, const FString& UpperName, const FString& LowerName);
+	
 	// 플레이어 목록 업데이트
 	UFUNCTION(BlueprintCallable, Category = "Room")
 	void UpdatePlayerList();

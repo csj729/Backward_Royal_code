@@ -22,6 +22,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override; // 추가
 
 	// 매 프레임마다 몸통 회전을 따라가기 위해 Tick이 필요합니다.
 	virtual void Tick(float DeltaTime) override;

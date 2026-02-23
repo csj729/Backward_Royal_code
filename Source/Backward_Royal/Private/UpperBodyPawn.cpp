@@ -101,6 +101,23 @@ void AUpperBodyPawn::BeginPlay()
 	//}
 }
 
+void AUpperBodyPawn::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	Super::EndPlay(EndPlayReason);
+
+	// [크래시 방지] 물리/충돌 컴포넌트 정리
+	// 상체 폰은 RootComponent가 SceneComponent일 수 있으나, 
+	// 혹시 모를 물리 충돌이나 자식 컴포넌트의 물리 작용을 차단
+	if (RootComponent)
+	{
+		if (UPrimitiveComponent* PrimComp = Cast<UPrimitiveComponent>(RootComponent))
+		{
+			PrimComp->SetSimulatePhysics(false);
+			PrimComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
+}
+
 void AUpperBodyPawn::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);

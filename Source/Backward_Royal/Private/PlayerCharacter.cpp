@@ -620,6 +620,30 @@ void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	Super::EndPlay(EndPlayReason);
 
+	// [크래시 방지] 레벨 이동 시 물리 엔진이 소멸된 컴포넌트를 참조하지 않도록 강제 종료
+	if (GetCapsuleComponent())
+	{
+		GetCapsuleComponent()->SetSimulatePhysics(false);
+		GetCapsuleComponent()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	if (GetMesh())
+	{
+		GetMesh()->SetSimulatePhysics(false);
+		GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+
+	// 파츠들도 물리 끄기
+	TArray<USkeletalMeshComponent*> Parts = { HeadMesh, ChestMesh, HandMesh, LegMesh, FootMesh };
+	for (USkeletalMeshComponent* Part : Parts)
+	{
+		if (Part)
+		{
+			Part->SetSimulatePhysics(false);
+			Part->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		}
+	}
+
 	// [핵심] 캐릭터가 파괴될 때 돌고 있던 타이머를 모두 해제하여 
 	// 댕글링 포인터 크래시(Access Violation) 방지
 	if (UWorld* World = GetWorld())
