@@ -123,7 +123,7 @@ public:
     FDeathDamageInfo LastDeathInfo;
 
     UFUNCTION(NetMulticast, Reliable)
-    void MulticastPerformDeathVisuals(FVector KillImpulse, FVector HitLocation, FVector ServerLoc, FRotator ServerRot);
+    void PerformDeathVisuals();
 
     // --- Weapon ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", Replicated)
@@ -166,9 +166,6 @@ public:
     // 스턴 상태에서 회복될 때 블루프린트에서 실행될 이벤트
     UFUNCTION(BlueprintImplementableEvent, Category = "Status|Stun")
     void OnRecoverFromStun();
-
-    UFUNCTION(NetMulticast, Unreliable)
-    void MulticastPlayPhysicalHitReaction(FVector Impulse, FVector HitLocation, FName BoneName);
 
 protected:
     bool bIsCharacterAttacking = false;

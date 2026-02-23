@@ -246,7 +246,21 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     {
         if (ABaseCharacter* VictimChar = Cast<ABaseCharacter>(OtherActor))
         {
-            VictimChar->MulticastPlayPhysicalHitReaction(FinalImpulseVector, Hit.ImpactPoint, Hit.BoneName);
+            // 타겟 캐릭터의 피지컬 애니메이션이 활성화된 메쉬를 가져옵니다.
+            if (USkeletalMeshComponent* VictimMesh = VictimChar->GetMesh())
+            {
+                FName HitBone = Hit.BoneName;
+
+                // 무기가 단단한 캡슐 컴포넌트에 맞았을 경우 특정 뼈 이름(NAME_None)이 없으므로,
+                // 맞은 위치(ImpactPoint)에서 가장 가까운 본을 찾아 충격을 전달합니다.
+                if (HitBone == NAME_None)
+                {
+                    HitBone = VictimMesh->FindClosestBone(Hit.ImpactPoint);
+                }
+
+                // 메쉬에 직접 물리적 반발력을 주입하면 피지컬 애니메이션이 반응하여 몸이 흔들립니다.
+                VictimMesh->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, HitBone);
+            }
         }
         // 캐릭터 외 일반 물리 시뮬레이션 물체 처리
         else if (OtherComp && OtherComp->IsSimulatingPhysics())

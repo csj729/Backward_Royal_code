@@ -1,84 +1,85 @@
 #include "PlayerResetZone.h"
-// --- ÇÊ¼ö Çì´õ ÆÄÀÏ Ãß°¡ ---
+
+// --- í•„ìˆ˜ í—¤ë” íŒŒì¼ ì¶”ê°€ ---
 #include "Components/BoxComponent.h"
 #include "Components/BillboardComponent.h"
-#include "GameFramework/Pawn.h"          // ÇÃ·¹ÀÌ¾î(Æù) ÀÎ½Ä¿ë
-#include "Kismet/GameplayStatics.h"      // ÇÃ·¹ÀÌ¾î ½ºÅ¸Æ® Ã£±â¿ë
-#include "GameFramework/PlayerStart.h"   // ÇÃ·¹ÀÌ¾î ½ºÅ¸Æ® Å¬·¡½º
+#include "GameFramework/Pawn.h"          // í”Œë ˆì´ì–´(í°) ì¸ì‹ìš©
+#include "Kismet/GameplayStatics.h"      // í”Œë ˆì´ì–´ ìŠ¤íƒ€íŠ¸ ì°¾ê¸°ìš©
+#include "GameFramework/PlayerStart.h"   // í”Œë ˆì´ì–´ ìŠ¤íƒ€íŠ¸ í´ë˜ìŠ¤
 // ---------------------------
 
-// »ı¼ºÀÚ
+// ìƒì„±ì
 APlayerResetZone::APlayerResetZone()
 {
-	// ÀÌ ¾×ÅÍ´Â ¿òÁ÷ÀÌÁö ¾ÊÀ¸¹Ç·Î TickÀÌ ÇÊ¿ä ¾ø½À´Ï´Ù. ÃÖÀûÈ­¸¦ À§ÇØ ²ü´Ï´Ù.
-	PrimaryActorTick.bCanEverTick = false;
+    // ì´ ì•¡í„°ëŠ” ë§¤ í”„ë ˆì„ ì—…ë°ì´íŠ¸ë  í•„ìš”ê°€ ì—†ìœ¼ë¯€ë¡œ Tickì„ ë•ë‹ˆë‹¤. ìµœì í™”ë¥¼ ìœ„í•´ êº¼ë‘¡ë‹ˆë‹¤.
+    PrimaryActorTick.bCanEverTick = false;
 
-	// 1. Æ®¸®°Å ¹Ú½º »ı¼º ¹× ¼³Á¤
-	TriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerBox"));
-	RootComponent = TriggerBox; // ÀÌ ¹Ú½º¸¦ ·çÆ®·Î ¼³Á¤
+    // 1. íŠ¸ë¦¬ê±° ë°•ìŠ¤ ìƒì„± ë° ì„¤ì •
+    TriggerBox = CreateDefaultSubobject<UBoxComponent>(TEXT("TriggerBox"));
+    RootComponent = TriggerBox; // ì´ ë°•ìŠ¤ë¥¼ ë£¨íŠ¸ ì»´í¬ë„ŒíŠ¸ë¡œ ì„¤ì •
 
-	// ¹Ú½º Å©±â ±âº»°ª ¼³Á¤ (¿¡µğÅÍ¿¡¼­ ½ºÄÉÀÏ·Î Á¶Àı °¡´É)
-	TriggerBox->SetBoxExtent(FVector(100.0f, 100.0f, 50.0f));
+    // ë°•ìŠ¤ í¬ê¸° ê¸°ë³¸ê°’ ì„¤ì • (ì—ë””í„°ì—ì„œ ììœ ë¡­ê²Œ í¬ê¸° ì¡°ì ˆ ê°€ëŠ¥)
+    TriggerBox->SetBoxExtent(FVector(100.0f, 100.0f, 50.0f));
 
-	// [Áß¿ä] Äİ¸®Àü ¼³Á¤: "Trigger" ÇÁ¸®¼Â »ç¿ë
-	// Trigger ÇÁ¸®¼ÂÀº ±âº»ÀûÀ¸·Î °ãÄ§(Overlap)¸¸ °¨ÁöÇÏ°í ¹°¸®ÀûÀ¸·Î ¸·Áö ¾Ê½À´Ï´Ù.
-	TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
+    // [ì¤‘ìš”] ì½œë¦¬ì „ ì„¤ì •: "Trigger" í”„ë¡œí•„ ì‚¬ìš©
+    // Trigger í”„ë¡œí•„ì€ ê¸°ë³¸ì ìœ¼ë¡œ ê²¹ì¹¨(Overlap)ì„ í—ˆìš©í•˜ê³  ë¬¼ë¦¬ì ìœ¼ë¡œ ë§‰ì§€ ì•ŠìŠµë‹ˆë‹¤.
+    TriggerBox->SetCollisionProfileName(TEXT("Trigger"));
 
 
-	// 2. (¼±ÅÃ»çÇ×) ¿¡µğÅÍ ¾ÆÀÌÄÜ ¼³Á¤
+    // 2. (ì„ íƒì‚¬í•­) ì—ë””í„° ì•„ì´ì½˜ ì„¤ì •
 #if WITH_EDITORONLY_DATA
-	SpriteIcon = CreateDefaultSubobject<UBillboardComponent>(TEXT("SpriteIcon"));
-	SpriteIcon->SetupAttachment(RootComponent);
-	// ¿¡µğÅÍ¿¡¼­ ½±°Ô ¼±ÅÃÇÏ±â À§ÇÑ ¾ÆÀÌÄÜ ·Îµå (¿£Áø ±âº» ¾ÆÀÌÄÜ »ç¿ë)
-	static ConstructorHelpers::FObjectFinder<UTexture2D> IconTexture(TEXT("/Engine/EditorResources/S_Trigger"));
-	if (IconTexture.Succeeded())
-	{
-		SpriteIcon->SetSprite(IconTexture.Object);
-		SpriteIcon->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.5f));
-	}
+    SpriteIcon = CreateDefaultSubobject<UBillboardComponent>(TEXT("SpriteIcon"));
+    SpriteIcon->SetupAttachment(RootComponent);
+    // ì—ë””í„°ì—ì„œ ìœ„ì¹˜ë¥¼ ì‹ë³„í•˜ê¸° ìœ„í•´ ì—”ì§„ ê¸°ë³¸ íŠ¸ë¦¬ê±° ì•„ì´ì½˜ì„ ë¡œë“œí•©ë‹ˆë‹¤.
+    static ConstructorHelpers::FObjectFinder<UTexture2D> IconTexture(TEXT("/Engine/EditorResources/S_Trigger"));
+    if (IconTexture.Succeeded())
+    {
+       SpriteIcon->SetSprite(IconTexture.Object);
+       SpriteIcon->SetRelativeScale3D(FVector(0.5f, 0.5f, 0.5f));
+    }
 #endif
 }
 
 void APlayerResetZone::BeginPlay()
 {
-	Super::BeginPlay();
+    Super::BeginPlay();
 
-	// [ÇÙ½É] ÀÌº¥Æ® ¿¬°á
-	// "TriggerBox¿¡ ¹«¾ğ°¡ °ãÄ¡¸é -> OnOverlapBegin ÇÔ¼ö¸¦ ½ÇÇàÇØ¶ó"
-	TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &APlayerResetZone::OnOverlapBegin);
+    // [í•µì‹¬] ì´ë²¤íŠ¸ ë°”ì¸ë”©
+    // "TriggerBoxì— ë¬´ì–¸ê°€ ê²¹ì¹˜ë©´ -> OnOverlapBegin í•¨ìˆ˜ë¥¼ ì‹¤í–‰í•´ë¼"
+    TriggerBox->OnComponentBeginOverlap.AddDynamic(this, &APlayerResetZone::OnOverlapBegin);
 }
 
-// ½ÇÁ¦ ¸®¼Â ·ÎÁ÷ ±¸Çö
+// ì˜¤ë²„ë©(ê²¹ì¹¨) ë°œìƒ ì‹œ ì‹¤í–‰
 void APlayerResetZone::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	// 1. ´êÀº ´ë»óÀÌ À¯È¿ÇÑÁö, ±×¸®°í ÀÚ±â ÀÚ½ÅÀº ¾Æ´ÑÁö Ã¼Å©
-	if (!OtherActor || OtherActor == this) return;
+    // 1. ê²¹ì¹œ ì•¡í„°ê°€ ìœ íš¨í•œì§€, ê·¸ë¦¬ê³  ìê¸° ìì‹ ì´ ì•„ë‹Œì§€ ì²´í¬
+    if (!OtherActor || OtherActor == this) return;
 
-	// 2. ´êÀº ´ë»óÀÌ 'ÇÃ·¹ÀÌ¾î(Pawn)'ÀÎÁö È®ÀÎ
-	// (¸ó½ºÅÍ³ª ´Ù¸¥ ¹°Ã¼´Â ´ê¾Æµµ ¸®¼ÂµÇ¸é ¾È µÇ´Ï±î¿ä)
-	APawn* PlayerPawn = Cast<APawn>(OtherActor);
+    // 2. ê²¹ì¹œ ì•¡í„°ê°€ 'í”Œë ˆì´ì–´(Pawn)'ì¸ì§€ í™•ì¸
+    // (ëª¬ìŠ¤í„°ë‚˜ ë‹¤ë¥¸ ë¬¼ì²´ê°€ ë–¨ì–´ì ¸ë„ ë¦¬ì…‹ë˜ë©´ ì•ˆ ë˜ê¸° ë•Œë¬¸ì…ë‹ˆë‹¤)
+    APawn* PlayerPawn = Cast<APawn>(OtherActor);
 
-	if (PlayerPawn)
-	{
-		// 3. ¿ùµå¿¡ ÀÖ´Â ¸ğµç 'PlayerStart' ¾×ÅÍ¸¦ Ã£½À´Ï´Ù.
-		TArray<AActor*> FoundPlayerStarts;
-		UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), FoundPlayerStarts);
+    if (PlayerPawn)
+    {
+       // 3. ì›”ë“œì— ìˆëŠ” ëª¨ë“  'PlayerStart' ì•¡í„°ë¥¼ ì°¾ìŠµë‹ˆë‹¤.
+       TArray<AActor*> FoundPlayerStarts;
+       UGameplayStatics::GetAllActorsOfClass(GetWorld(), APlayerStart::StaticClass(), FoundPlayerStarts);
 
-		// PlayerStart°¡ ÇÏ³ª¶óµµ ÀÖ´Ù¸é
-		if (FoundPlayerStarts.Num() > 0)
-		{
-			// Ã¹ ¹øÂ°·Î ¹ß°ßµÈ PlayerStartÀÇ À§Ä¡¸¦ °¡Á®¿É´Ï´Ù.
-			FVector RestartLocation = FoundPlayerStarts[0]->GetActorLocation();
+       // PlayerStartê°€ í•˜ë‚˜ë¼ë„ ìˆë‹¤ë©´
+       if (FoundPlayerStarts.Num() > 0)
+       {
+          // ì²« ë²ˆì§¸ë¡œ ë°œê²¬ëœ PlayerStartì˜ ìœ„ì¹˜ë¥¼ ê°€ì ¸ì˜µë‹ˆë‹¤.
+          FVector RestartLocation = FoundPlayerStarts[0]->GetActorLocation();
 
-			// 4. ÇÃ·¹ÀÌ¾î¸¦ ÇØ´ç À§Ä¡·Î ¼ø°£ÀÌµ¿½ÃÅµ´Ï´Ù.
-			PlayerPawn->SetActorLocation(RestartLocation);
+          // 4. í”Œë ˆì´ì–´ë¥¼ í•´ë‹¹ ìœ„ì¹˜ë¡œ ìˆœê°„ì´ë™ ì‹œí‚µë‹ˆë‹¤.
+          PlayerPawn->SetActorLocation(RestartLocation);
 
-			// ·Î±× Ãâ·Â (Å×½ºÆ®¿ë)
-			UE_LOG(LogTemp, Warning, TEXT("[%s]°¡ À§Çè ±¸¿ª¿¡ ÁøÀÔÇÏ¿© ¸®¼ÂµÇ¾ú½À´Ï´Ù!"), *PlayerPawn->GetName());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Error, TEXT("¸Ê¿¡ PlayerStart°¡ ¾ø½À´Ï´Ù! ¸®¼ÂÇÒ ¼ö ¾ø½À´Ï´Ù."));
-		}
-	}
+          // ë¡œê·¸ ì¶œë ¥ (í…ŒìŠ¤íŠ¸ìš©)
+          UE_LOG(LogTemp, Warning, TEXT("[%s]ê°€ ë‚™í•˜ êµ¬ì—­ì— ì§„ì…í•˜ì—¬ ë¦¬ì…‹ë˜ì—ˆìŠµë‹ˆë‹¤!"), *PlayerPawn->GetName());
+       }
+       else
+       {
+          UE_LOG(LogTemp, Error, TEXT("ì›”ë“œì— PlayerStartê°€ ì—†ìŠµë‹ˆë‹¤! ë¦¬ì…‹í•  ìˆ˜ ì—†ìŠµë‹ˆë‹¤."));
+       }
+    }
 }

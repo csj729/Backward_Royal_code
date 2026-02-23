@@ -40,7 +40,7 @@ ABaseWeapon::ABaseWeapon()
     bReplicates = true;
     AActor::SetReplicateMovement(true);
 
-    // WeaponMesh->SetIsReplicated(true); // Error 유발
+    WeaponMesh->SetIsReplicated(true);
 }
 
 // 에디터에서 수치(RowName 등) 변경 시 즉시 반영
