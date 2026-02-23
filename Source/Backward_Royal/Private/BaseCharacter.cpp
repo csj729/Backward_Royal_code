@@ -326,14 +326,14 @@ void ABaseCharacter::Die(FVector KillImpulse, FVector HitLocation)
         PS->SetPlayerStatus(EPlayerStatus::Dead);
     }
 
-    // 2. 사망 정보 확정 저장 (서버 위치 등)
+    // 2. 사망 정보 확정 저장
     LastDeathInfo.Impulse = KillImpulse;
     LastDeathInfo.HitLocation = HitLocation;
     LastDeathInfo.ServerDieLocation = GetActorLocation();
     LastDeathInfo.ServerDieRotation = GetActorRotation();
 
-    // 3. 래그돌/이펙트 처리
-    PerformDeathVisuals();
+    // 3. [핵심 수정] 변수 복제를 기다리지 않고 멀티캐스트로 랙돌 명령과 충격량을 한 번에 전송!
+    MulticastPerformDeathVisuals(KillImpulse, HitLocation, LastDeathInfo.ServerDieLocation, LastDeathInfo.ServerDieRotation);
 
     // 4. 게임 모드에 알림
     if (ABRGameMode* GM = GetWorld()->GetAuthGameMode<ABRGameMode>())
@@ -342,48 +342,15 @@ void ABaseCharacter::Die(FVector KillImpulse, FVector HitLocation)
     }
 }
 
-void ABaseCharacter::PerformDeathVisuals_Implementation()
+void ABaseCharacter::MulticastPerformDeathVisuals_Implementation(FVector KillImpulse, FVector HitLoc, FVector ServerLoc, FRotator ServerRot)
 {
     // 이미 물리 시뮬레이션 중이라면 중복 실행 방지
     if (GetMesh()->IsSimulatingPhysics()) return;
 
-    // --- 변수 가져오기 ---
-    FVector Impulse = LastDeathInfo.Impulse;
-    FVector HitLocation = LastDeathInfo.HitLocation;
-    FVector ServerLoc = LastDeathInfo.ServerDieLocation;
-    FRotator ServerRot = LastDeathInfo.ServerDieRotation;
+    CHAR_LOG(Warning, TEXT("Multicast PerformDeath Executed - Impulse: %s"), *KillImpulse.ToString());
 
-    CHAR_LOG(Warning, TEXT("PerformDeathVisuals Executed - Impulse: %s"), *Impulse.ToString());
-
-    // [중요] 이동 동기화 해제 (서버와 클라이언트 연결 고리 끊기)
+    // 이동 동기화 해제
     SetReplicateMovement(false);
-
-    // ==========================================
-    // [핵심] 하체 및 부착된 상체의 조작 완전 차단 (멀티캐스트로 각 클라이언트 로컬에서 실행)
-    // ==========================================
-    // 1. 하체(자신)의 조작 비활성화
-    if (APlayerController* PC = Cast<APlayerController>(GetController()))
-    {
-        DisableInput(PC);
-    }
-
-    // 2. 자신에게 부착된 상체(UpperBody) 폰을 찾아 조작 및 애니메이션 비활성화
-    TArray<AActor*> AttachedActors;
-    GetAttachedActors(AttachedActors);
-    for (AActor* Actor : AttachedActors)
-    {
-        if (APawn* AttachedPawn = Cast<APawn>(Actor))
-        {
-            // 상체 폰의 입력을 제거하여 로컬(클라이언트)에서의 공격/시점 회전 완전 차단
-            if (APlayerController* UpperPC = Cast<APlayerController>(AttachedPawn->GetController()))
-            {
-                AttachedPawn->DisableInput(UpperPC);
-            }
-            // 상체 폰의 Tick을 꺼서 회전 및 애니메이션 업데이트 완전 정지
-            AttachedPawn->SetActorTickEnabled(false);
-        }
-    }
-    // ==========================================
 
     // 1. 위치 싱크 (오차 보정)
     if (!HasAuthority() && FVector::DistSquared(GetActorLocation(), ServerLoc) < 250000.0f)
@@ -413,31 +380,30 @@ void ABaseCharacter::PerformDeathVisuals_Implementation()
         GetMesh()->SetCollisionProfileName(TEXT("Ragdoll"));
         GetMesh()->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 
-        // 루트 본 하위 모든 바디 시뮬레이션
         FName RootBoneName = GetMesh()->GetBoneName(0);
         GetMesh()->SetAllBodiesBelowSimulatePhysics(RootBoneName, true, true);
 
         GetMesh()->SetSimulatePhysics(true);
         GetMesh()->WakeAllRigidBodies();
 
-        // 4. 충격량 적용
-        if (GetMesh()->IsSimulatingPhysics() && !Impulse.IsNearlyZero())
+        // 4. 확실하게 전달받은 충격량(KillImpulse) 직접 적용!
+        if (GetMesh()->IsSimulatingPhysics() && !KillImpulse.IsNearlyZero())
         {
-            if (!HitLocation.IsNearlyZero())
+            if (!HitLoc.IsNearlyZero())
             {
-                FName ClosestBone = GetMesh()->FindClosestBone(HitLocation);
+                FName ClosestBone = GetMesh()->FindClosestBone(HitLoc);
                 if (ClosestBone != NAME_None)
                 {
-                    GetMesh()->AddImpulseAtLocation(Impulse, HitLocation, ClosestBone);
+                    GetMesh()->AddImpulseAtLocation(KillImpulse, HitLoc, ClosestBone);
                 }
                 else
                 {
-                    GetMesh()->AddImpulseAtLocation(Impulse, HitLocation);
+                    GetMesh()->AddImpulseAtLocation(KillImpulse, HitLoc);
                 }
             }
             else
             {
-                GetMesh()->AddImpulse(Impulse);
+                GetMesh()->AddImpulse(KillImpulse);
             }
         }
     }
@@ -591,4 +557,21 @@ void ABaseCharacter::MulticastRecoverFromStun_Implementation()
 
     // 블루프린트 이벤트 호출 (모든 클라이언트에서 실행됨)
     OnRecoverFromStun();
+}
+
+void ABaseCharacter::MulticastPlayPhysicalHitReaction_Implementation(FVector Impulse, FVector HitLocation, FName BoneName)
+{
+    if (USkeletalMeshComponent* MyMesh = GetMesh())
+    {
+        // 충격을 받은 부위가 명확하지 않다면 가장 가까운 뼈를 찾음
+        if (BoneName == NAME_None)
+        {
+            BoneName = MyMesh->FindClosestBone(HitLocation);
+        }
+
+        // 모든 클라이언트 화면에서 메쉬 흔들림 적용
+        MyMesh->AddImpulseAtLocation(Impulse, HitLocation, BoneName);
+
+        CHAR_LOG(Log, TEXT("Client Physics Hit React: %s"), *BoneName.ToString());
+    }
 }

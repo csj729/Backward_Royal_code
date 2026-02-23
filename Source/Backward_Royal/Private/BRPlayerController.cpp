@@ -623,20 +623,24 @@ void ABRPlayerController::StartSpectatingMode()
 {
 	if (!HasAuthority()) return;
 
-	// 1. 현재 폰 파괴 (선택 사항이지만 관전 모드 전환 시 깔끔하게 제거하거나 래그돌로 남길 수 있음)
-	// ChangeState(NAME_Spectating)을 호출하면 자동으로 UnPossess가 일어납니다.
+	SetIgnoreMoveInput(false);
+	SetIgnoreLookInput(false);
 
-	// 2. 관전 상태로 전환
-	// 이 함수는 APlayerController의 protected 멤버이지만, 상속받은 클래스 내부에서는 호출 가능합니다.
+	// 1. 순수하게 관전 상태로만 전환합니다. (Destroy 관련 코드 전부 삭제)
 	ChangeState(NAME_Spectating);
 
-	// 3. 클라이언트에게 UI 변경 알림
+	// 2. 클라이언트 UI 변경 및 잠금 해제 요청
 	ClientHandleSpectatorUI();
 }
 
 void ABRPlayerController::ClientHandleSpectatorUI_Implementation()
 {
-	// 블루프린트에서 구현된 이벤트 호출 (HUD 숨기기 등)
+	// 1. 걸려있던 이동/시야 무시 자물쇠만 해제
+	// 이 두 줄만 있으면 관전 폰의 기본 비행 조작이 상체/하체 상관없이 활성화됩니다.
+	SetIgnoreMoveInput(false);	
+	SetIgnoreLookInput(false);
+
+	// 2. 블루프린트에서 구현된 이벤트 호출 (HUD 숨기기 등)
 	OnEnterSpectatorMode();
 }
 
