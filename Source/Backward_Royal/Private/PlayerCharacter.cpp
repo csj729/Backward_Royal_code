@@ -19,6 +19,11 @@ DEFINE_LOG_CATEGORY(LogPlayerChar);
 #define LOG_PLAYER(Verbosity, Format, ...) \
     UE_LOG(LogPlayerChar, Verbosity, TEXT("%s - %s"), *FString(__FUNCTION__), *FString::Printf(Format, ##__VA_ARGS__))
 
+// static 변수 초기화
+float APlayerCharacter::Global_RotationRateYaw = 300.0f;
+float APlayerCharacter::Global_BrakingFriction = 1.0f;
+float APlayerCharacter::Global_BrakingDecelerationWalking = 500.0f;
+
 APlayerCharacter::APlayerCharacter()
 {
 	// [기본 설정 유지 및 수정]
@@ -31,15 +36,15 @@ APlayerCharacter::APlayerCharacter()
 
 	// 회전 관성 적용
 	GetCharacterMovement()->bUseControllerDesiredRotation = true; // 컨트롤러 시점 방향으로 천천히 회전하게 만듭니다.
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 300.0f, 0.0f); // Yaw 수치가 낮을수록 회전이 더 묵직하고 느려집니다. (기존 500.0f)
+	GetCharacterMovement()->RotationRate = FRotator(0.0f, Global_RotationRateYaw, 0.0f); // Yaw 수치가 낮을수록 회전이 더 묵직하고 느려집니다. (기존 500.0f)
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 
 	// 2. WASD 이동 관성 (가속 및 감속)
 	// 캐릭터의 초기 가속을 느리게 하고, 키를 뗐을 때 즉시 멈추지 않고 미끄러지듯 감속하게 합니다.
 	GetCharacterMovement()->MaxAcceleration = 600.f; // 가속도: 수치가 낮을수록 최고 속도에 도달하기까지 오래 걸려 무겁게 느껴집니다.
 	GetCharacterMovement()->bUseSeparateBrakingFriction = true; // 감속 마찰력을 별도로 사용하도록 활성화합니다.
-	GetCharacterMovement()->BrakingFriction = 1.f; // 마찰력: 수치가 낮을수록 키를 뗐을 때 지면에서 더 많이 미끄러집니다.
-	GetCharacterMovement()->BrakingDecelerationWalking = 500.f; // 감속도: 수치가 낮을수록 완전히 정지할 때까지의 거리가 길어집니다.
+	GetCharacterMovement()->BrakingFriction = Global_BrakingFriction; // 마찰력: 수치가 낮을수록 키를 뗐을 때 지면에서 더 많이 미끄러집니다.
+	GetCharacterMovement()->BrakingDecelerationWalking = Global_BrakingDecelerationWalking; // 감속도: 수치가 낮을수록 완전히 정지할 때까지의 거리가 길어집니다.
 
 	// GetMesh()->SetOwnerNoSee(true); // <- 몸 투명화
 	GetMesh()->bCastHiddenShadow = true;
@@ -656,5 +661,47 @@ void APlayerCharacter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(TimerHandle_RetryBindPartner);
+	}
+}
+
+void APlayerCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	// 발자국 소리 로직 실행
+	ProcessFootstep(DeltaTime);
+}
+void APlayerCharacter::ProcessFootstep(float DeltaTime)
+{
+	// 1. 현재 공중에 떠 있는지 확인 (점프 중엔 소리 X)
+	if (GetCharacterMovement()->IsFalling()) 
+	{
+		AccumulatedDistance = 0.0f; // 착지 시 바로 소리 나게 하거나, 0으로 초기화
+		return;
+	}
+
+	// 2. 현재 속도(Velocity) 가져오기 (Z축 제외, 수평 이동만 계산)
+	FVector Velocity = GetVelocity();
+	Velocity.Z = 0.0f;
+	float Speed = Velocity.Size();
+
+	// 3. 멈춰있으면(속도가 거의 0이면) 계산 중단
+	if (Speed < 10.0f) return;
+
+	// 4. 이동 거리 누적 (속도 * 시간 = 거리)
+	AccumulatedDistance += Speed * DeltaTime;
+
+	// 5. 누적 거리가 설정한 간격(Threshold)을 넘었는지 확인
+	if (AccumulatedDistance >= FootstepDistanceThreshold)
+	{
+		// 소리 재생
+		if (FootstepSound)
+		{
+			UGameplayStatics::PlaySoundAtLocation(this, FootstepSound, GetActorLocation());
+		}
+
+		// 6. 누적 거리 초기화 (나머지 값은 남겨둠으로써 오차 보정)
+		// 예: 155 이동 -> 150 차감 -> 5 남김 (다음 발자국이 조금 더 빨리 울리게 자연스럽게 처리)
+		AccumulatedDistance -= FootstepDistanceThreshold;
 	}
 }

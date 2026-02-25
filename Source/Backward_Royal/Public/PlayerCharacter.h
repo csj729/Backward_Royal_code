@@ -9,144 +9,163 @@
 
 DECLARE_LOG_CATEGORY_EXTERN(LogPlayerChar, Log, All);
 
-// UI È£È¯¼ºÀ» À§ÇØ µ¨¸®°ÔÀÌÆ® Á¤ÀÇ À¯Áö
+// UI í˜¸í™˜ì„±ì„ ìœ„í•´ ë¸ë¦¬ê²Œì´íŠ¸ ì •ì˜ ìœ ì§€
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnStaminaChanged, float, CurrentStamina, float, MaxStamina);
 
 UCLASS()
 class BACKWARD_ROYAL_API APlayerCharacter : public ABaseCharacter
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	APlayerCharacter();
-	virtual void OnRep_PlayerState() override;
+    APlayerCharacter();
+    virtual void OnRep_PlayerState() override;
+
+    // í”Œë ˆì´ì–´ ì´ë™ ê´€ë ¨ ì „ì—­ ë³€ìˆ˜ (GameInstanceì—ì„œ ì—…ë°ì´íŠ¸ë¨)
+    static float Global_RotationRateYaw;
+    static float Global_BrakingFriction;
+    static float Global_BrakingDecelerationWalking;
 
 protected:
-	virtual void BeginPlay() override;
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-	virtual void PossessedBy(AController* NewController) override;
-	virtual void Restart() override;
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void BeginPlay() override;
+    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    virtual void PossessedBy(AController* NewController) override;
+    virtual void Restart() override;
+    virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    virtual void Tick(float DeltaTime) override;
+    
+    // ë°œìêµ­ ì†Œë¦¬ ì²˜ë¦¬ í•¨ìˆ˜
+    void ProcessFootstep(float DeltaTime);
 
-	// --- Input Functions ---
-	void Move(const FInputActionValue& Value);
-	void Look(const FInputActionValue& Value);
-	virtual void Jump() override;
+    // --- Input Functions ---
+    void Move(const FInputActionValue& Value);
+    void Look(const FInputActionValue& Value);
+    virtual void Jump() override;
 
-	// ¿£ÁøÀÌ "Á¡ÇÁ °¡´É ¿©ºÎ"¸¦ ¹°¾îº¼ ¶§ ½ºÅÂ¹Ì³ªµµ Ã¼Å©ÇÏµµ·Ï ¿À¹ö¶óÀÌµå
-	virtual bool CanJumpInternal_Implementation() const override;
+    // ì—”ì§„ì´ "ì í”„ ê°€ëŠ¥ ì—¬ë¶€"ë¥¼ ë¬¼ì–´ë³¼ ë•Œ ìŠ¤íƒœë¯¸ë‚˜ë„ ì²´í¬í•˜ë„ë¡ ì˜¤ë²„ë¼ì´ë“œ
+    virtual bool CanJumpInternal_Implementation() const override;
 
-	// ½ÇÁ¦·Î Á¡ÇÁ°¡ ¹ß»ıÇßÀ» ¶§ È£ÃâµÇ´Â ÇÔ¼ö ¿À¹ö¶óÀÌµå
-	virtual void OnJumped_Implementation() override;
+    // ì‹¤ì œë¡œ ì í”„ê°€ ë°œìƒí–ˆì„ ë•Œ í˜¸ì¶œë˜ëŠ” í•¨ìˆ˜ ì˜¤ë²„ë¼ì´ë“œ
+    virtual void OnJumped_Implementation() override;
 
-	// [¼öÁ¤] ÀÔ·Â ÇÔ¼ö°¡ ÄÄÆ÷³ÍÆ®¸¦ È£ÃâÇÏµµ·Ï º¯°æ
-	void SprintStart(const FInputActionValue& Value);
-	void SprintEnd(const FInputActionValue& Value);
+    // [ìˆ˜ì •] ì…ë ¥ í•¨ìˆ˜ê°€ ì»´í¬ë„ŒíŠ¸ë¥¼ í˜¸ì¶œí•˜ë„ë¡ ë³€ê²½
+    void SprintStart(const FInputActionValue& Value);
+    void SprintEnd(const FInputActionValue& Value);
 
-	// [½Å±Ô] ÄÄÆ÷³ÍÆ®·ÎºÎÅÍ "´Ş¸®±â ºÒ°¡´É/°¡´É" »óÅÂ¸¦ Àü´Ş¹Ş´Â Äİ¹é
-	UFUNCTION()
-	void HandleSprintStateChanged(bool bCanSprint);
+    // [ì‹ ê·œ] ì»´í¬ë„ŒíŠ¸ë¡œë¶€í„° "ë‹¬ë¦¬ê¸° ë¶ˆê°€ëŠ¥/ê°€ëŠ¥" ìƒíƒœë¥¼ ì „ë‹¬ë°›ëŠ” ì½œë°±
+    UFUNCTION()
+    void HandleSprintStateChanged(bool bCanSprint);
 
-	// [½Å±Ô] ÄÄÆ÷³ÍÆ®ÀÇ ½ºÅÂ¹Ì³ª º¯È­¸¦ UI·Î Àü´Ş(Relay)ÇÏ´Â Äİ¹é
-	UFUNCTION()
-	void HandleStaminaChanged(float CurrentVal, float MaxVal);
+    // [ì‹ ê·œ] ì»´í¬ë„ŒíŠ¸ì˜ ìŠ¤íƒœë¯¸ë‚˜ ë³€í™”ë¥¼ UIë¡œ ì „ë‹¬(Relay)í•˜ëŠ” ì½œë°±
+    UFUNCTION()
+    void HandleStaminaChanged(float CurrentVal, float MaxVal);
 
-	// [½Å±Ô] ÀÌº¥Æ® ±â¹İ Ä¿¸¶ Àû¿ë ½Ãµµ
-	UFUNCTION()
-	void TryApplyCustomization();
+    // [ì‹ ê·œ] ì»¤ìŠ¤í„°ë§ˆì´ì§• ì ìš© ì‹œë„ í•¨ìˆ˜
+    UFUNCTION()
+    void TryApplyCustomization();
 
-	// [½Å±Ô] ÆÄÆ®³Ê°¡ ÁöÁ¤µÇ¾úÀ» ¶§ ÆÄÆ®³ÊÀÇ ÀÌº¥Æ®¸¦ ±¸µ¶ÇÏ´Â ÇÔ¼ö
-	UFUNCTION()
-	void BindToPartnerPlayerState(bool bIsLowerBody);
+    // [ì‹ ê·œ] íŒŒíŠ¸ë„ˆê°€ ìœ íš¨í•  ë•Œ íŒŒíŠ¸ë„ˆì˜ ì´ë²¤íŠ¸ë¥¼ ë°”ì¸ë”©í•˜ëŠ” í•¨ìˆ˜
+    UFUNCTION()
+    void BindToPartnerPlayerState(bool bIsLowerBody);
 
-	// ½ÇÁ¦ ¸Ş½Ã ±³Ã¼ ·ÎÁ÷ (ID¸¦ ¹Ş¾Æ¼­ ½ÇÁ¦ SkeletalMesh Àû¿ë)
-	void ApplyMeshFromID(EArmorSlot Slot, int32 MeshID);
+    // íŠ¹ì • ë©”ì‰¬ êµì²´ ì ìš© (IDë¥¼ ë°›ì•„ì„œ ë§¤ì¹­ë˜ëŠ” SkeletalMesh ì ìš©)
+    void ApplyMeshFromID(EArmorSlot Slot, int32 MeshID);
 
-	// »óÃ¼/ÇÏÃ¼ PlayerState Ã£±â ÇïÆÛ
-	class ABRPlayerState* GetUpperBodyPlayerState() const;
-	class ABRPlayerState* GetLowerBodyPlayerState() const;
-
-public:
-	// --- Components ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	class UStaminaComponent* StaminaComp; // ½ºÅÂ¹Ì³ª °ü¸® ÄÄÆ÷³ÍÆ®
-
-	// --- Camera & Coop ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	class USpringArmComponent* RearCameraBoom;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
-	class UCameraComponent* RearCamera;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop")
-	class USceneComponent* HeadMountPoint;
-
-	// --- External Setter ---
-	void SetUpperBodyRotation(FRotator NewRotation);
-	void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
-	virtual FRotator GetBaseAimRotation() const override;
-
-	// UI¿¡¼­ È£ÃâÇÏ¿© ·Îºñ Ä³¸¯ÅÍÀÇ ¿ÜÇüÀ» Áï½Ã º¯°æÇÏ´Â ÇÔ¼ö
-	UFUNCTION(BlueprintCallable, Category = "Customization")
-	void UpdatePreviewMesh(const FBRCustomizationData& NewData);
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
-	USkeletalMesh* DefaultHeadMesh;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
-	USkeletalMesh* DefaultChestMesh;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
-	USkeletalMesh* DefaultHandMesh;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
-	USkeletalMesh* DefaultLegMesh;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
-	USkeletalMesh* DefaultFootMesh;
+    // ìƒì²´/í•˜ì²´ PlayerState ì°¾ê¸° í—¬í¼
+    class ABRPlayerState* GetUpperBodyPlayerState() const;
+    class ABRPlayerState* GetLowerBodyPlayerState() const;
 
 public:
-	// --- Input Assets ---
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputMappingContext* DefaultMappingContext;
+    // --- Components ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+    class UStaminaComponent* StaminaComp; // ìŠ¤íƒœë¯¸ë‚˜ ê´€ë¦¬ ì»´í¬ë„ŒíŠ¸
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* MoveAction;
+    // --- Camera & Coop ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    class USpringArmComponent* RearCameraBoom;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* LookAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
+    class UCameraComponent* RearCamera;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* JumpAction;
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop")
+    class USceneComponent* HeadMountPoint;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
-	class UInputAction* SprintAction;
+    // --- External Setter ---
+    void SetUpperBodyRotation(FRotator NewRotation);
+    void SetUpperBodyPawn(class AUpperBodyPawn* InPawn) { CurrentUpperBodyPawn = InPawn; }
+    virtual FRotator GetBaseAimRotation() const override;
 
-	// --- Movement Settings ---
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float WalkSpeed = 600.0f;
+    // UIì—ì„œ í˜¸ì¶œí•˜ì—¬ ë¡œë¹„ ìºë¦­í„°ì˜ ë¯¸ë¦¬ë³´ê¸° ë©”ì‰¬ë¥¼ ì—…ë°ì´íŠ¸í•˜ëŠ” í•¨ìˆ˜
+    UFUNCTION(BlueprintCallable, Category = "Customization")
+    void UpdatePreviewMesh(const FBRCustomizationData& NewData);
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
-	float SprintSpeed = 1000.0f;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+    USkeletalMesh* DefaultHeadMesh;
 
-	UPROPERTY(BlueprintAssignable, Category = "Events")
-	FOnStaminaChanged OnStaminaChanged;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+    USkeletalMesh* DefaultChestMesh;
 
-	// --- Replicated Variables ---
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop|Animation", Replicated)
-	FRotator UpperBodyAimRotation;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+    USkeletalMesh* DefaultHandMesh;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+    USkeletalMesh* DefaultLegMesh;
+
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Customization|Defaults")
+    USkeletalMesh* DefaultFootMesh;
+
+public:
+    // --- Input Assets ---
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    class UInputMappingContext* DefaultMappingContext;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    class UInputAction* MoveAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    class UInputAction* LookAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    class UInputAction* JumpAction;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input")
+    class UInputAction* SprintAction;
+
+    // --- Movement Settings ---
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float WalkSpeed = 600.0f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Movement")
+    float SprintSpeed = 1000.0f;
+
+    UPROPERTY(BlueprintAssignable, Category = "Events")
+    FOnStaminaChanged OnStaminaChanged;
+
+    // --- Replicated Variables ---
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Coop|Animation", Replicated)
+    FRotator UpperBodyAimRotation;
+    
+    // [ì‹ ê·œ] ë°œìêµ­ ì†Œë¦¬ ê°„ê²© (ì˜ˆ: 150cmë§ˆë‹¤ ì†Œë¦¬ ì¬ìƒ)
+    UPROPERTY(EditAnywhere, Category = "Sound")
+    float FootstepDistanceThreshold = 150.0f;
+    
+    UPROPERTY(EditAnywhere, Category = "Sound")
+    class USoundBase* FootstepSound;
 
 protected:
-	UPROPERTY()
-	class AUpperBodyPawn* CurrentUpperBodyPawn;
+    UPROPERTY()
+    class AUpperBodyPawn* CurrentUpperBodyPawn;
 
 private:
-	FTimerHandle TimerHandle_RetryBindPartner;
+    
+    // ì´ë™ ê±°ë¦¬ ëˆ„ì  ë³€ìˆ˜
+    float AccumulatedDistance = 0.0f;
+    FTimerHandle TimerHandle_RetryBindPartner;
 
-	// ÃÖÃÊ ¿ÜÇü ¼¼ÆÃ ¿Ï·á ÈÄ ¿µ±¸ Àá±İÇÏ±â À§ÇÑ ÇÃ·¡±×
-	bool bAppearanceLocked = false;
+    // ì´ˆê¸° ì™¸í˜• ì„¤ì • ì™„ë£Œ í›„ ì¤‘ë³µ ì ìš© ë°©ì§€ í”Œë˜ê·¸
+    bool bAppearanceLocked = false;
 
-	// ÆÄÆ®³Ê PlayerState¿¡ ¹ÙÀÎµùÇß´ÂÁö Ã¼Å©
-	bool bBoundToPartner = false;
+    // íŒŒíŠ¸ë„ˆ PlayerStateì— ë°”ì¸ë”©ë˜ì—ˆëŠ”ì§€ ì²´í¬
+    bool bBoundToPartner = false;
 };

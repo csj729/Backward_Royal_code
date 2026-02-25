@@ -24,6 +24,8 @@
 #include "PlayerCharacter.h"
 #include "StaminaComponent.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "BRAttackComponent.h"
 #include "TimerManager.h"
 #include "UObject/Package.h"
 #include "UObject/UnrealType.h"
@@ -959,80 +961,116 @@ void UBRGameInstance::SaveDataTableToAsset(UDataTable *TargetTable) {
 }
 
 void UBRGameInstance::ApplyGlobalMultipliers() {
-  if (UDataTable **TargetTablePtr =
-          ConfigDataMap.Find(TEXT("GlobalSettings"))) {
-    UDataTable *GlobalTable = *TargetTablePtr;
-    if (GlobalTable) {
-      static const FString ContextString(TEXT("Global Settings Context"));
-      FGlobalBalanceData *FoundData = GlobalTable->FindRow<FGlobalBalanceData>(
-          FName("Default"), ContextString);
+    if (UDataTable** TargetTablePtr =
+        ConfigDataMap.Find(TEXT("GlobalSettings"))) {
+        UDataTable* GlobalTable = *TargetTablePtr;
+        if (GlobalTable) {
+            static const FString ContextString(TEXT("Global Settings Context"));
+            FGlobalBalanceData* FoundData = GlobalTable->FindRow<FGlobalBalanceData>(
+                FName("Default"), ContextString);
 
-      if (FoundData) {
-        // 1. 무기 관련 전역 변수 업데이트
-        ABaseWeapon::GlobalDamageMultiplier =
-            FoundData->Global_Weapon_DamageMultiplier;
-        ABaseWeapon::GlobalImpulseMultiplier =
-            FoundData->Global_Weapon_ImpulseMultiplier;
-        ABaseWeapon::GlobalAttackSpeedMultiplier =
-            FoundData->Global_Weapon_AttackSpeedMultiplier;
-        ABaseWeapon::GlobalDurabilityReduction =
-            FoundData->Global_Durability_Reduction;
+            if (FoundData) {
+                // 1. 무기 관련 전역 변수 업데이트
+                ABaseWeapon::GlobalDamageMultiplier =
+                    FoundData->Global_Weapon_DamageMultiplier;
+                ABaseWeapon::GlobalImpulseMultiplier =
+                    FoundData->Global_Weapon_ImpulseMultiplier;
+                ABaseWeapon::GlobalAttackSpeedMultiplier =
+                    FoundData->Global_Weapon_AttackSpeedMultiplier;
+                ABaseWeapon::GlobalDurabilityReduction =
+                    FoundData->Global_Durability_Reduction;
 
-        // 2. 스태미나 관련 전역(static) 변수 업데이트
-        UStaminaComponent::Global_SprintDrainRate =
-            FoundData->Global_Stamina_SprintDrainRate;
-        UStaminaComponent::Global_JumpCost = FoundData->Global_Stamina_JumpCost;
-        UStaminaComponent::Global_RegenRate =
-            FoundData->Global_Stamina_RegenRate;
+                // 2. 스태미나 관련 전역(static) 변수 업데이트
+                UStaminaComponent::Global_SprintDrainRate =
+                    FoundData->Global_Stamina_SprintDrainRate;
+                UStaminaComponent::Global_JumpCost = FoundData->Global_Stamina_JumpCost;
+                UStaminaComponent::Global_RegenRate =
+                    FoundData->Global_Stamina_RegenRate;
 
-        // 3. (핵심) 이미 소환된 캐릭터들에게도 즉시 적용 (실시간 리로드를 위해)
-        if (UWorld *World = GetWorld()) {
-          // 캐릭터 및 스태미나 업데이트
-          for (TActorIterator<APlayerCharacter> It(World); It; ++It) {
-            APlayerCharacter *PC = *It;
+                // 3. 맨손 공격 관련 전역 변수 업데이트
+                UBRAttackComponent::Global_BasePunchDamage =
+                    FoundData->Global_BasePunchDamage;
 
-            // A. 스태미나 컴포넌트 업데이트 (기존 코드)
-            if (UStaminaComponent *StaminaComp = PC->StaminaComp) {
-              StaminaComp->StaminaDrainRate =
-                  UStaminaComponent::Global_SprintDrainRate;
-              StaminaComp->JumpCost = UStaminaComponent::Global_JumpCost;
-              StaminaComp->StaminaRegenRate =
-                  UStaminaComponent::Global_RegenRate;
+                // 4. 플레이어 이동 관성 관련 전역 변수 업데이트
+                APlayerCharacter::Global_RotationRateYaw =
+                    FoundData->Global_Player_RotationRateYaw;
+                APlayerCharacter::Global_BrakingFriction =
+                    FoundData->Global_Player_BrakingFriction;
+                APlayerCharacter::Global_BrakingDecelerationWalking =
+                    FoundData->Global_Player_BrakingDecelerationWalking;
+
+                // 5. (핵심) 이미 소환된 캐릭터들에게도 즉시 적용 (실시간 리로드를 위해)
+                if (UWorld* World = GetWorld()) {
+                    // 캐릭터 및 스태미나, 이동 관성, 공격 업데이트
+                    for (TActorIterator<APlayerCharacter> It(World); It; ++It) {
+                        APlayerCharacter* PC = *It;
+
+                        // A. 스태미나 컴포넌트 업데이트
+                        if (UStaminaComponent* StaminaComp = PC->StaminaComp) {
+                            StaminaComp->StaminaDrainRate =
+                                UStaminaComponent::Global_SprintDrainRate;
+                            StaminaComp->JumpCost = UStaminaComponent::Global_JumpCost;
+                            StaminaComp->StaminaRegenRate =
+                                UStaminaComponent::Global_RegenRate;
+                        }
+
+                        // B. 캐릭터가 장착 중인 무기 업데이트
+                        if (ABaseWeapon* CharacterWeapon = PC->CurrentWeapon) {
+                            // 내구도 감소량 등 인스턴스 변수 갱신
+                            CharacterWeapon->DurabilityReduction =
+                                ABaseWeapon::GlobalDurabilityReduction;
+                        }
+
+                        // C. 플레이어 이동(관성) 업데이트
+                        if (UCharacterMovementComponent* MovementComp = PC->GetCharacterMovement()) {
+                            MovementComp->RotationRate = FRotator(0.0f, APlayerCharacter::Global_RotationRateYaw, 0.0f);
+                            MovementComp->BrakingFriction = APlayerCharacter::Global_BrakingFriction;
+                            MovementComp->BrakingDecelerationWalking = APlayerCharacter::Global_BrakingDecelerationWalking;
+                        }
+
+                    }
+
+                    // 바닥에 떨어져 있는(장착되지 않은) 무기들도 업데이트
+                    for (TActorIterator<ABaseWeapon> It(World); It; ++It) {
+                        ABaseWeapon* Weapon = *It;
+                        Weapon->DurabilityReduction =
+                            ABaseWeapon::GlobalDurabilityReduction;
+                    }
+                }
+
+                // 앞으로 스폰될 캐릭터를 위한 CDO(Class Default Object) 업데이트
+                if (APlayerCharacter* DefaultPlayerChar = GetMutableDefault<APlayerCharacter>()) {
+                    if (UCharacterMovementComponent* DefaultMovementComp = DefaultPlayerChar->GetCharacterMovement()) {
+                        DefaultMovementComp->RotationRate = FRotator(0.0f, APlayerCharacter::Global_RotationRateYaw, 0.0f);
+                        DefaultMovementComp->BrakingFriction = APlayerCharacter::Global_BrakingFriction;
+                        DefaultMovementComp->BrakingDecelerationWalking = APlayerCharacter::Global_BrakingDecelerationWalking;
+                    }
+                }
+
+                GI_LOG(Display,
+                    TEXT("스태미나 세팅 적용. Stamina: Drain(%.1f), Jump(%.1f), "
+                        "Regen(%.1f)"),
+                    UStaminaComponent::Global_SprintDrainRate,
+                    UStaminaComponent::Global_JumpCost,
+                    UStaminaComponent::Global_RegenRate);
+
+                GI_LOG(Display,
+                    TEXT("무기 배율 세팅 적용. Weapon: Damage(%.1f), Impulse(%.1f), "
+                        "AttackSpeed(%.1f)"),
+                    ABaseWeapon::GlobalDamageMultiplier,
+                    ABaseWeapon::GlobalImpulseMultiplier,
+                    ABaseWeapon::GlobalAttackSpeedMultiplier);
+
+                GI_LOG(Display,
+                    TEXT("맨손 공격 및 플레이어 이동 세팅 적용. PunchDamage(%.1f), "
+                        "Rotation(%.1f), Friction(%.1f), Deceleration(%.1f)"),
+                    UBRAttackComponent::Global_BasePunchDamage,
+                    APlayerCharacter::Global_RotationRateYaw,
+                    APlayerCharacter::Global_BrakingFriction,
+                    APlayerCharacter::Global_BrakingDecelerationWalking);
             }
-
-            // B. 캐릭터가 장착 중인 무기 업데이트
-            // (캐릭터에 GetCurrentWeapon() 같은 접근자가 있다고 가정)
-            if (ABaseWeapon *CharacterWeapon = PC->CurrentWeapon) {
-              // 내구도 감소량 등 인스턴스 변수 갱신
-              CharacterWeapon->DurabilityReduction =
-                  ABaseWeapon::GlobalDurabilityReduction;
-            }
-          }
-
-          // C. 바닥에 떨어져 있는(장착되지 않은) 무기들도 업데이트
-          for (TActorIterator<ABaseWeapon> It(World); It; ++It) {
-            ABaseWeapon *Weapon = *It;
-            Weapon->DurabilityReduction =
-                ABaseWeapon::GlobalDurabilityReduction;
-          }
         }
-
-        GI_LOG(Display,
-               TEXT("스태미나 세팅 적용. Stamina: Drain(%.1f), Jump(%.1f), "
-                    "Regen(%.1f)"),
-               UStaminaComponent::Global_SprintDrainRate,
-               UStaminaComponent::Global_JumpCost,
-               UStaminaComponent::Global_RegenRate);
-
-        GI_LOG(Display,
-               TEXT("무기 배율 세팅 적용. Weapon: Damage(%.1f), Impulse(%.1f), "
-                    "AttackSpeed(%.1f)"),
-               ABaseWeapon::GlobalDamageMultiplier,
-               ABaseWeapon::GlobalImpulseMultiplier,
-               ABaseWeapon::GlobalAttackSpeedMultiplier);
-      }
     }
-  }
 }
 
 void UBRGameInstance::DoPIEExitCleanup(UWorld *World) {

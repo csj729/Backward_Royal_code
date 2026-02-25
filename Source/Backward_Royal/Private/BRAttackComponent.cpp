@@ -11,7 +11,7 @@ DEFINE_LOG_CATEGORY(LogAttackComp);
 
 // 기본 펀치 데미지 전역 변수
 
-float UBRAttackComponent::BasePunchDamage = 10.f;
+float UBRAttackComponent::Global_BasePunchDamage = 10.0f;
 
 UBRAttackComponent::UBRAttackComponent()
 {
@@ -214,7 +214,7 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     else
     {
         // [수정] 맨손 공격 시 기본 데미지 10 추가
-        CalculatedDamage = (ImpactForce * 0.001f) + BasePunchDamage;
+        CalculatedDamage = (ImpactForce * 0.001f) + Global_BasePunchDamage;
     }
 
     // 디버그 출력

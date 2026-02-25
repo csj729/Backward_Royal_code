@@ -14,7 +14,7 @@ class BACKWARD_ROYAL_API UBRAttackComponent : public UActorComponent
 public:
 	UBRAttackComponent();
 
-	static float BasePunchDamage;
+	static float Global_BasePunchDamage;
 
 protected:
 	virtual void BeginPlay() override;
