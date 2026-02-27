@@ -48,5 +48,9 @@ public:
 	/** Listen Server로 재시작 (맵?listen). 호스트는 이 명령 실행 후 방 만들기. 콘솔: OpenListenServer */
 	UFUNCTION(Exec, Category = "Session")
 	void OpenListenServer();
+
+	/** [부하 테스트] 서버 상태 요약 출력 (연결 인원, 맵, stat 명령 안내). 서버/호스트 콘솔에서 StatServer */
+	UFUNCTION(Exec, Category = "Session")
+	void StatServer();
 };
 

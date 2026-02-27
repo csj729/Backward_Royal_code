@@ -7,9 +7,12 @@
 #include "BRGameMode.h"
 #include "BRGameInstance.h"
 #include "UpperBodyPawn.h"
+#include "PlayerCharacter.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/SpectatorPawn.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "EnhancedInputComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "Engine/NetDriver.h"
@@ -19,6 +22,9 @@
 #include "Blueprint/UserWidget.h"
 #include "EngineUtils.h"
 #include "Misc/Char.h"
+#include "Kismet/GameplayStatics.h"
+#include "Misc/Paths.h"
+
 
 ABRPlayerController::ABRPlayerController()
 	: CurrentMenuWidget(nullptr)
@@ -408,14 +414,98 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 		}
 	}
 
-	if (IsLocalController() && aPawn->IsA<AUpperBodyPawn>())
+	if (IsLocalController() && aPawn)
 	{
-		ApplyUpperBodyViewAndInput();
+		if (aPawn->IsA<AUpperBodyPawn>())
+			ApplyUpperBodyViewAndInput();
+		else if (aPawn->IsA<APlayerCharacter>())
+			SetupRoleInput(true, aPawn); // 하체: 이동 키 매핑(LowerBodyContext) 등록, 폰 전달로 폴백 확실히 동작
 	}
+
+	// 리슨 서버: 호스트는 클라이언트 쪽 AcknowledgePossession이 호출되지 않을 수 있음 → 서버에서 직접 스폰 완료 집계
+	if (HasAuthority() && IsLocalController() && aPawn && (aPawn->IsA<APlayerCharacter>() || aPawn->IsA<AUpperBodyPawn>()))
+	{
+		if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+		{
+			GS->ReportClientSpawnReady(this);
+		}
+	}
+
+	// [로딩 중 키보드 비인식 기능 주석 처리] 서버: 전원 스폰 완료 시 호스트 이동 입력 해제용 바인딩
+	// if (HasAuthority() && IsLocalController() && aPawn && (aPawn->IsA<APlayerCharacter>() || aPawn->IsA<AUpperBodyPawn>()))
+	// {
+	// 	if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+	// 	{
+	// 		if (!bSpawnReadyDelegateBound)
+	// 		{
+	// 			GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+	// 			bSpawnReadyDelegateBound = true;
+	// 		}
+	// 		if (GS->bAllClientsSpawnReady)
+	// 			OnAllClientsSpawnReadyCallback();
+	// 	}
+	// }
 
 	if (OnPawnChanged.IsBound())
 	{
 		OnPawnChanged.Broadcast(aPawn);
+	}
+}
+
+void ABRPlayerController::OnAllClientsSpawnReadyCallback()
+{
+	// [로딩 중 키보드 비인식 기능 주석 처리] 스폰 완료 시 입력 모드 전환·이동 입력 해제
+	// if (!IsLocalController()) return;
+	// UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] 콜백 실행 (로컬 플레이어, 서버=%d)"), HasAuthority() ? 1 : 0);
+	// FInputModeGameOnly GameInputMode;
+	// SetInputMode(GameInputMode);
+	// bShowMouseCursor = false;
+	// APawn* P = GetPawn();
+	// if (P && P->IsA<APlayerCharacter>())
+	// {
+	// 	ResetIgnoreMoveInput();
+	// 	SetIgnoreMoveInput(false);
+	// 	UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 이동 입력 해제 (하체 로컬 플레이어)"));
+	// }
+}
+
+void ABRPlayerController::AcknowledgePossession(APawn* P)
+{
+	Super::AcknowledgePossession(P);
+	if (!P || (!P->IsA<APlayerCharacter>() && !P->IsA<AUpperBodyPawn>())) return;
+
+	// 클라이언트: 서버에 스폰 완료 신호 전송
+	if (!HasAuthority())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 클라이언트 AcknowledgePossession → ServerReportSpawnReady (Pawn=%s)"), *P->GetName());
+		ServerReportSpawnReady();
+	}
+
+	// 클라이언트: 상체(UpperBodyPawn)가 아니면 하체로 간주하고 이동 키 매핑 등록. BP_LowerBodyCharacter 등 APlayerCharacter가 아닌 하체 폰도 포함
+	if (!HasAuthority() && IsLocalController() && P && !P->IsA<AUpperBodyPawn>())
+		SetupRoleInput(true, P);
+
+	// [로딩 중 키보드 비인식 기능 주석 처리] 클라이언트: 전원 스폰 완료 시 이동 입력 해제용 델리게이트 바인딩
+	// if (!HasAuthority() && IsLocalController())
+	// {
+	// 	if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+	// 	{
+	// 		if (!bSpawnReadyDelegateBound)
+	// 		{
+	// 			GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+	// 			bSpawnReadyDelegateBound = true;
+	// 		}
+	// 		if (GS->bAllClientsSpawnReady)
+	// 			OnAllClientsSpawnReadyCallback();
+	// 	}
+	// }
+}
+
+void ABRPlayerController::ServerReportSpawnReady_Implementation()
+{
+	if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+	{
+		GS->ReportClientSpawnReady(this);
 	}
 }
 
@@ -544,6 +634,13 @@ void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 				GameSession->OnCreateSessionComplete.RemoveAll(this);
 			}
 		}
+		// [로딩 중 키보드 비인식 기능 주석 처리] 스폰 완료 델리게이트 바인딩 해제
+		// if (bSpawnReadyDelegateBound)
+		// {
+		// 	if (ABRGameState* GS = World->GetGameState<ABRGameState>())
+		// 		GS->OnAllClientsSpawnReady.RemoveDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+		// 	bSpawnReadyDelegateBound = false;
+		// }
 	}
 	
 	Super::EndPlay(EndPlayReason);
@@ -652,8 +749,23 @@ void ABRPlayerController::StartSpectatingMode()
 	ClientHandleSpectatorUI();
 }
 
+void ABRPlayerController::SetupSpectatorInput()
+{
+	// 관전 모드는 하체(이동) 컨텍스트를 재사용하여 이동을 가능하게 함
+	SetupRoleInput(true);
+}
+
 void ABRPlayerController::ClientHandleSpectatorUI_Implementation()
 {
+	// 입력 매핑을 하체(이동 가능) 컨텍스트로 변경하여 관전 시 이동 가능하게 함
+	SetupSpectatorInput();
+
+	// [추가] 1. 딜리게이트 브로드캐스트 (위젯에서 바인딩 가능)
+	if (OnEnterSpectatorModeDelegate.IsBound())
+	{
+		OnEnterSpectatorModeDelegate.Broadcast();
+	}
+
 	// 블루프린트에서 구현된 이벤트 호출 (HUD 숨기기 등)
 	OnEnterSpectatorMode();
 }
@@ -1136,8 +1248,53 @@ static FString SanitizeRoomName(const FString& InName)
 	return S;
 }
 
+bool ABRPlayerController::CheckSensitiveRPCRateLimit()
+{
+	if (!GetWorld() || !HasAuthority()) return true; // 클라이언트/비서버에서는 검사 생략
+	const float Now = GetWorld()->GetTimeSeconds();
+	if (Now - LastSensitiveRPCTime < MinSensitiveRPCIntervalSec)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] RPC 레이트 리밋: 호출 간격이 너무 짧아 무시 (%.2fs)"), MinSensitiveRPCIntervalSec);
+		return false;
+	}
+	LastSensitiveRPCTime = Now;
+	return true;
+}
+
+bool ABRPlayerController::IsInLobbyMap() const
+{
+	UWorld* World = GetWorld();
+	if (!World) return false;
+	FString CurrentMapName = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (CurrentMapName.IsEmpty())
+	{
+		CurrentMapName = World->GetMapName();
+		CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
+	}
+	FString LobbyMapBase = TEXT("Main_Scene");
+	if (ABRGameMode* BRGM = World->GetAuthGameMode<ABRGameMode>())
+	{
+		LobbyMapBase = BRGM->LobbyMapPath.IsEmpty() ? TEXT("Main_Scene") : FPaths::GetBaseFilename(BRGM->LobbyMapPath);
+	}
+	return CurrentMapName.Equals(LobbyMapBase, ESearchCase::IgnoreCase);
+}
+
 void ABRPlayerController::ServerCreateRoom_Implementation(const FString& RoomName)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 서버 보안: 이미 세션이 있으면 방 생성 거부 (중복 생성·비정상 호출 방지)
+	UWorld* World = GetWorld();
+	if (World && World->GetAuthGameMode() && World->GetAuthGameMode()->GameSession)
+	{
+		if (ABRGameSession* BRSession = Cast<ABRGameSession>(World->GetAuthGameMode()->GameSession))
+		{
+			if (BRSession->HasActiveSession())
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 방 생성 거부: 이미 활성 세션이 있음"));
+				return;
+			}
+		}
+	}
 	FString SafeName = SanitizeRoomName(RoomName);
 	CreateRoom(SafeName.IsEmpty() ? TEXT("Host's Game") : SafeName);
 }
@@ -1149,16 +1306,51 @@ void ABRPlayerController::ServerFindRooms_Implementation()
 
 void ABRPlayerController::ServerJoinRoom_Implementation(int32 SessionIndex)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 서버 보안: 잘못된 세션 인덱스 거부 (음수 또는 상한 초과)
+	if (SessionIndex < 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[방 참가] 서버 보안: 잘못된 세션 인덱스 무시 (%d)"), SessionIndex);
+		return;
+	}
+	UWorld* World = GetWorld();
+	if (World && World->GetAuthGameMode() && World->GetAuthGameMode()->GameSession)
+	{
+		if (ABRGameSession* BRSession = Cast<ABRGameSession>(World->GetAuthGameMode()->GameSession))
+		{
+			const int32 SessionCount = BRSession->GetSessionCount();
+			if (SessionCount > 0 && SessionIndex >= SessionCount)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[방 참가] 서버 보안: 세션 인덱스 범위 초과 (%d, 최대 %d)"), SessionIndex, SessionCount - 1);
+				return;
+			}
+		}
+	}
 	JoinRoom(SessionIndex);
 }
 
 void ABRPlayerController::ServerToggleReady_Implementation()
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
 	ToggleReady();
 }
 
 void ABRPlayerController::ServerRequestRandomTeams_Implementation()
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 방장 전용 RPC: 방장이 아니면 무시
+	ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>();
+	if (!BRPS || !BRPS->bIsHost)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 방장 전용 RPC(랜덤 팀): 방장이 아니어서 무시"));
+		return;
+	}
+	// 로비 전용: 로비 맵이 아니면 무시 (게임 중 RPC 남용 방지)
+	if (!IsInLobbyMap())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 로비 전용 RPC(랜덤 팀): 로비 맵이 아니어서 무시"));
+		return;
+	}
 	// 서버에서 직접 팀 배정 실행 (역할/팀 번호만 설정, 상체 스폰·빙의는 게임 맵 로드 후 적용)
 	if (ABRGameState* BRGameState = GetWorld()->GetGameState<ABRGameState>())
 	{
@@ -1185,6 +1377,20 @@ void ABRPlayerController::ServerRequestRandomTeams_Implementation()
 
 void ABRPlayerController::ServerRequestChangePlayerTeam_Implementation(int32 PlayerIndex, int32 NewTeamNumber)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 방장 전용 RPC: 방장이 아니면 무시
+	ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>();
+	if (!BRPS || !BRPS->bIsHost)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 방장 전용 RPC(팀 변경): 방장이 아니어서 무시"));
+		return;
+	}
+	// 로비 전용: 로비 맵이 아니면 무시
+	if (!IsInLobbyMap())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 로비 전용 RPC(팀 변경): 로비 맵이 아니어서 무시"));
+		return;
+	}
 	if (NewTeamNumber < MinTeamNumber || NewTeamNumber > MaxTeamNumber)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[팀 변경] 서버 보안: 잘못된 팀 번호 무시 (%d, 허용 0~%d)"), NewTeamNumber, MaxTeamNumber);
@@ -1224,11 +1430,26 @@ void ABRPlayerController::ServerRequestChangePlayerTeam_Implementation(int32 Pla
 
 void ABRPlayerController::ServerRequestStartGame_Implementation()
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 방장 전용 RPC: 방장이 아니면 무시
+	ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>();
+	if (!BRPS || !BRPS->bIsHost)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 방장 전용 RPC(게임 시작): 방장이 아니어서 무시"));
+		return;
+	}
+	// 로비 전용: 로비 맵이 아니면 무시 (게임 중 시작 RPC 남용 방지)
+	if (!IsInLobbyMap())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 로비 전용 RPC(게임 시작): 로비 맵이 아니어서 무시"));
+		return;
+	}
 	StartGame();
 }
 
 void ABRPlayerController::ServerSetPlayerName_Implementation(const FString& NewPlayerName)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
 	FString Sanitized = SanitizePlayerName(NewPlayerName);
 	if (Sanitized.IsEmpty()) Sanitized = TEXT("Player");
 	UE_LOG(LogTemp, Warning, TEXT("[로비이름] ServerSetPlayerName 수신 | NewPlayerName='%s' | HasAuthority=%d"), *Sanitized, HasAuthority() ? 1 : 0);
@@ -1244,6 +1465,7 @@ void ABRPlayerController::ServerSetPlayerName_Implementation(const FString& NewP
 
 void ABRPlayerController::ServerSetTeamNumber_Implementation(int32 NewTeamNumber)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
 	if (NewTeamNumber < MinTeamNumber || NewTeamNumber > MaxTeamNumber)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[팀 번호 설정] 서버 보안: 잘못된 팀 번호 무시 (%d, 허용 0~%d)"), NewTeamNumber, MaxTeamNumber);
@@ -1258,6 +1480,7 @@ void ABRPlayerController::ServerSetTeamNumber_Implementation(int32 NewTeamNumber
 
 void ABRPlayerController::ServerSetPlayerRole_Implementation(bool bLowerBody)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
 	if (ABRPlayerState* BRPS = GetPlayerState<ABRPlayerState>())
 	{
 		// 현재는 연결된 플레이어 인덱스를 -1로 설정 (나중에 연결 로직 추가 가능)
@@ -1323,6 +1546,13 @@ void ABRPlayerController::RequestMoveMyPlayerToLobbyEntry()
 
 void ABRPlayerController::ServerRequestAssignToLobbyTeam_Implementation(int32 TeamIndex, int32 SlotIndex)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 로비 전용: 로비 맵이 아니면 무시 (게임 중 슬롯 RPC 남용 방지)
+	if (!IsInLobbyMap())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 로비 전용 RPC(팀 슬롯 배치): 로비 맵이 아니어서 무시"));
+		return;
+	}
 	if (TeamIndex < 0 || TeamIndex >= NumLobbyTeams || SlotIndex < 0 || SlotIndex >= MaxSlotsPerTeam)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[로비] 서버 보안: 잘못된 슬롯 인덱스 무시 (Team=%d Slot=%d)"), TeamIndex, SlotIndex);
@@ -1340,6 +1570,13 @@ void ABRPlayerController::ServerRequestAssignToLobbyTeam_Implementation(int32 Te
 
 void ABRPlayerController::ServerRequestMoveToLobbyEntry_Implementation(int32 TeamIndex, int32 SlotIndex)
 {
+	if (!CheckSensitiveRPCRateLimit()) return;
+	// 로비 전용: 로비 맵이 아니면 무시
+	if (!IsInLobbyMap())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[서버 보안] 로비 전용 RPC(대기열 이동): 로비 맵이 아니어서 무시"));
+		return;
+	}
 	if (TeamIndex < 0 || TeamIndex >= NumLobbyTeams || SlotIndex < 0 || SlotIndex >= MaxSlotsPerTeam)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[로비] 서버 보안: 잘못된 슬롯 인덱스 무시 (Team=%d Slot=%d)"), TeamIndex, SlotIndex);
@@ -1703,27 +1940,124 @@ void ABRPlayerController::ShowRoomInfo()
 	UE_LOG(LogTemp, Log, TEXT("==================="));
 }
 
-void ABRPlayerController::SetupRoleInput(bool bIsLower)
+void ABRPlayerController::SetupRoleInput(bool bIsLower, APawn* OptionalPawnForFallback)
 {
+    UE_LOG(LogTemp, Log, TEXT("[SetupRoleInput] 호출됨 bIsLower=%d Pawn=%s OptionalPawn=%s"), bIsLower ? 1 : 0, GetPawn() ? *GetPawn()->GetName() : TEXT("null"), OptionalPawnForFallback ? *OptionalPawnForFallback->GetName() : TEXT("null"));
+
     ULocalPlayer* LocalPlayer = GetLocalPlayer();
-    if (!LocalPlayer) return;
-
-    if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+    if (!LocalPlayer)
     {
-        Subsystem->ClearAllMappings();
+        UE_LOG(LogTemp, Warning, TEXT("[SetupRoleInput] 조기 반환: GetLocalPlayer()=null (하체일 경우 키보드 미동작 원인)"));
+        return;
+    }
 
-        UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
-        if (TargetContext)
+    UEnhancedInputLocalPlayerSubsystem* Subsystem = LocalPlayer->GetSubsystem<UEnhancedInputLocalPlayerSubsystem>();
+    if (!Subsystem)
+    {
+        UE_LOG(LogTemp, Warning, TEXT("[SetupRoleInput] 조기 반환: EnhancedInputLocalPlayerSubsystem 없음 (하체일 경우 키보드 미동작 원인)"));
+        return;
+    }
+
+    Subsystem->ClearAllMappings();
+
+    UInputMappingContext* TargetContext = bIsLower ? LowerBodyContext : UpperBodyContext;
+    // 하체인데 BRPlayerController에 LowerBodyContext가 할당되지 않은 경우, 폰(PlayerCharacter)의 DefaultMappingContext 사용
+    if (!TargetContext && bIsLower)
+    {
+        APlayerCharacter* PC = OptionalPawnForFallback ? Cast<APlayerCharacter>(OptionalPawnForFallback) : Cast<APlayerCharacter>(GetPawn());
+        if (PC && PC->DefaultMappingContext)
         {
-            Subsystem->AddMappingContext(TargetContext, 0);
+            TargetContext = PC->DefaultMappingContext;
+            UE_LOG(LogTemp, Warning, TEXT("[SetupRoleInput] 하체: BRPlayerController의 Lower Body Context 미할당 → PlayerCharacter의 Default Mapping Context 사용 중. 에디터에서 Input > Lower Body Context 할당 권장."));
         }
     }
-
-    if (APawn* P = GetPawn())
+    if (!TargetContext && bIsLower)
     {
-        // 클라이언트에게 입력 시스템 재시작 명령 (SetupPlayerInputComponent 재호출 유도)
-        ClientRestart(P);
+        UE_LOG(LogTemp, Error, TEXT("[SetupRoleInput] 하체 키보드 인식 불가: Lower Body Context와 PlayerCharacter의 Default Mapping Context가 모두 비어 있습니다. PlayerCharacter 블루프린트의 Input > Default Mapping Context 또는 BRPlayerController의 Lower Body Context를 할당해주세요."));
     }
+    if (TargetContext)
+    {
+        Subsystem->AddMappingContext(TargetContext, 0);
+        UE_LOG(LogTemp, Log, TEXT("[SetupRoleInput] 매핑 컨텍스트 적용 완료 bIsLower=%d Context=%s"), bIsLower ? 1 : 0, *TargetContext->GetName());
+    }
+
+    // 하체일 때 이동/시선 입력 무시 해제 (상체 전환 시 SetIgnoreMoveInput(true) 되므로, 하체로 돌아올 때 명시적으로 해제 필요)
+    if (bIsLower && IsLocalController())
+    {
+        ResetIgnoreMoveInput();
+        SetIgnoreMoveInput(false);
+        ResetIgnoreLookInput();
+        SetIgnoreLookInput(false);
+        FInputModeGameOnly GameInputMode;
+        SetInputMode(GameInputMode);
+        bShowMouseCursor = false;
+    }
+}
+
+void ABRPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+
+	if (UEnhancedInputComponent* EnhancedInputComponent = Cast<UEnhancedInputComponent>(InputComponent))
+	{
+		// 관전 이동 (IA_SpectatorMove)
+		if (IA_SpectatorMove)
+		{
+			EnhancedInputComponent->BindAction(IA_SpectatorMove, ETriggerEvent::Triggered, this, &ABRPlayerController::Input_SpectatorMove);
+		}
+
+		// 관전 시점 회전 (IA_SpectatorLook)
+		if (IA_SpectatorLook)
+		{
+			EnhancedInputComponent->BindAction(IA_SpectatorLook, ETriggerEvent::Triggered, this, &ABRPlayerController::Input_SpectatorLook);
+		}
+	}
+}
+
+void ABRPlayerController::Input_SpectatorMove(const FInputActionValue& Value)
+{
+	// 관전 모드가 아니면 무시 (혹은 현재 Pawn이 SpectatorPawn인지 확인)
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !ControlledPawn->IsA<ASpectatorPawn>())
+	{
+		return;
+	}
+
+	FVector2D MovementVector = Value.Get<FVector2D>();
+
+	// SpectatorPawn은 기본적으로 MoveForward/MoveRight 함수를 가지고 있음
+	// (카메라 방향 기준으로 이동)
+	if (ASpectatorPawn* Spectator = Cast<ASpectatorPawn>(ControlledPawn))
+	{
+		if (MovementVector.X != 0.0f)
+		{
+			Spectator->MoveForward(MovementVector.X);
+		}
+		if (MovementVector.Y != 0.0f)
+		{
+			Spectator->MoveRight(MovementVector.Y);
+		}
+	}
+}
+
+void ABRPlayerController::Input_SpectatorLook(const FInputActionValue& Value)
+{
+	APawn* ControlledPawn = GetPawn();
+	if (!ControlledPawn || !ControlledPawn->IsA<ASpectatorPawn>())
+	{
+		return;
+	}
+
+	FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+	if (LookAxisVector.X != 0.0f)
+	{
+		ControlledPawn->AddControllerYawInput(LookAxisVector.X);
+	}
+	if (LookAxisVector.Y != 0.0f)
+	{
+		ControlledPawn->AddControllerPitchInput(LookAxisVector.Y);
+	}
 }
 
 // ========== UI 관리 함수 구현 ==========
@@ -1894,6 +2228,15 @@ void ABRPlayerController::SetMainScreenToEntranceMenu()
 		if (Function)
 		{
 			MainScreenWidget->ProcessEvent(Function, nullptr);
+			// UI 전환 후 키보드 인식을 위해 입력 모드 및 포커스 설정
+			if (IsLocalController())
+			{
+				FInputModeUIOnly InputMode;
+				InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+				SetInputMode(InputMode);
+				bShowMouseCursor = true;
+				MainScreenWidget->SetUserFocus(this);
+			}
 			UE_LOG(LogTemp, Log, TEXT("[PlayerController] SetMainScreenToEntranceMenu 호출 완료"));
 			return;
 		}
@@ -1950,6 +2293,15 @@ void ABRPlayerController::SetMainScreenToLobbyMenu()
 		if (Function)
 		{
 			MainScreenWidget->ProcessEvent(Function, nullptr);
+			// UI 전환 후 키보드 인식을 위해 입력 모드 및 포커스 설정
+			if (IsLocalController())
+			{
+				FInputModeUIOnly InputMode;
+				InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+				SetInputMode(InputMode);
+				bShowMouseCursor = true;
+				MainScreenWidget->SetUserFocus(this);
+			}
 			UE_LOG(LogTemp, Log, TEXT("[PlayerController] SetMainScreenToLobbyMenu 호출 완료"));
 			// LobbyMenu 전환 직후 OnPlayerListChanged 브로드캐스트 → 방 제목·플레이어 목록 UI 즉시 갱신
 			if (ABRGameState* BRGS = World->GetGameState<ABRGameState>())
@@ -2125,6 +2477,8 @@ void ABRPlayerController::ShowMenuWidget(TSubclassOf<UUserWidget> WidgetClass)
 			InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 			SetInputMode(InputMode);
 			bShowMouseCursor = true;
+			// 키보드 입력이 UI에 전달되도록 위젯에 포커스 부여 (미설정 시 키 인식 안 됨)
+			CurrentMenuWidget->SetUserFocus(this);
 			
 			// Standalone 모드에서 위젯이 입력을 받을 수 있도록 강제 설정
 			if (CurrentMenuWidget->GetOwningPlayer() == nullptr)

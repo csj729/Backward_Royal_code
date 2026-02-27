@@ -176,18 +176,33 @@ void UBRAttackComponent::InternalHandleOwnerHit(UPrimitiveComponent* HitComponen
     ProcessHitDamage(OtherActor, OtherComp, NormalImpulse, Hit);
 }
 
+void UBRAttackComponent::MulticastPlayHitSound_Implementation(USoundBase* SoundToPlay, FVector Location, float Volume)
+{
+    if (SoundToPlay)
+    {
+        UGameplayStatics::PlaySoundAtLocation(this, SoundToPlay, Location, Volume);
+    }
+}
+
+
 void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit)
 {
-    ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
+    // 1. 안전 장치 (튕김 방지)
+    AActor* OwnerActor = GetOwner();
+    if (!IsValid(OwnerActor)) return;
+
+    ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(OwnerActor);
+    if (!IsValid(OwnerChar)) return;
+
     ABaseWeapon* MyWeapon = OwnerChar->CurrentWeapon;
 
     if (HitActors.Contains(OtherActor)) return;
 
-    // [수정] 피지컬 애니메이션 적용 시 무기 충돌 반발력이 수십만 단위로 폭증하여 무기가 즉시 파괴되는 현상 방지를 위해 제한(Clamp)
+    // 2. 충격량 계산 (Clamp 적용)
     float ImpactForce = FMath::Clamp(NormalImpulse.Size(), 0.0f, 5000.0f);
     float ImpulseMultiplier = 1.0f;
 
-    if (MyWeapon)
+    if (IsValid(MyWeapon))
     {
         ImpulseMultiplier = ABaseWeapon::GlobalImpulseMultiplier * MyWeapon->CurrentWeaponData.MassKg * MyWeapon->CurrentWeaponData.ImpulseCoefficient;
     }
@@ -199,70 +214,77 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
 
     FVector FinalImpulseVector = ImpulseDir * FinalImpulsePower;
 
-    // [충격량 미리 주입]
+    // 3. 충격량 정보 전달 (피격자에게)
     if (ABaseCharacter* Victim = Cast<ABaseCharacter>(OtherActor))
     {
         Victim->SetLastHitInfo(FinalImpulseVector, Hit.ImpactPoint);
     }
 
-    // [데미지 계산]
+    // 4. 데미지 계산
     float CalculatedDamage = 0.0f;
-    if (MyWeapon)
+    if (IsValid(MyWeapon))
     {
         CalculatedDamage = ImpactForce * MyWeapon->CurrentWeaponData.DamageCoefficient * MyWeapon->CurrentWeaponData.MassKg * ABaseWeapon::GlobalDamageMultiplier * 0.001f;
     }
     else
     {
-        // [수정] 맨손 공격 시 기본 데미지 10 추가
-        CalculatedDamage = (ImpactForce * 0.001f) + Global_BasePunchDamage;
+        // [안전 처리] Global_BasePunchDamage 변수가 없다면 10.0f 기본값 사용
+        float BaseDamage = 10.0f; 
+        // 만약 헤더에 Global_BasePunchDamage가 있다면 위 줄을 지우고 사용하세요.
+        CalculatedDamage = (ImpactForce * 0.001f) + BaseDamage;
     }
 
     // 디버그 출력
     if (GEngine)
     {
-        FString DebugMsg = FString::Printf(TEXT("Hit: %s | Dmg: %.1f | Impulse: %.0f"),
-            *OtherActor->GetName(), CalculatedDamage, FinalImpulsePower);
+        FString DebugMsg = FString::Printf(TEXT("Hit: %s | Dmg: %.1f"), *OtherActor->GetName(), CalculatedDamage);
         GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, DebugMsg);
-
-        ATK_LOG(Log, TEXT("Target: %s, Damage: %.1f, Impulse: %.1f"), *OtherActor->GetName(), CalculatedDamage, FinalImpulsePower);
     }
 
-    // 유효타 처리
+    // 5. 유효타 처리 (데미지 적용 및 소리 재생)
     if (CalculatedDamage >= 3.0f)
     {
-        UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
-
-        if (MyWeapon)
+        UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, OwnerChar->GetController(), OwnerChar, nullptr);
+        
+        if (IsValid(MyWeapon))
         {
+            // 무기 내구도 감소
             MyWeapon->DecreaseDurability(CalculatedDamage);
+
+            // [신규] 무기 타격음 재생 (멀티캐스트)
+            if (MyWeapon->CurrentWeaponData.HitSound)
+            {
+                // 모든 클라이언트에게 소리 재생 명령
+                MulticastPlayHitSound(MyWeapon->CurrentWeaponData.HitSound, Hit.ImpactPoint, 1.0f);
+            }
+        }
+        else 
+        {
+            // [신규] 맨손 타격음 재생 (멀티캐스트)
+            if (IsValid(OwnerChar) && OwnerChar->PunchHitSound)
+            {
+                MulticastPlayHitSound(OwnerChar->PunchHitSound, Hit.ImpactPoint, OwnerChar->PunchVolume);
+            }
         }
     }
 
-    // 공격 성공 시 히트 스탑 적용 (0.1초 멈춤 -> 이후 애니메이션 종료)
+    // 6. 히트 스탑 및 물리 반발력 적용
     MulticastApplyHitStop(0.1f);
 
-    // 피지컬 애니메이션에 충격량 명시적 전달
-    if (GetOwner()->HasAuthority())
+    if (OwnerChar->HasAuthority())
     {
         if (ABaseCharacter* VictimChar = Cast<ABaseCharacter>(OtherActor))
         {
-            // 타겟 캐릭터의 피지컬 애니메이션이 활성화된 메쉬를 가져옵니다.
             if (USkeletalMeshComponent* VictimMesh = VictimChar->GetMesh())
             {
                 FName HitBone = Hit.BoneName;
-
-                // 무기가 단단한 캡슐 컴포넌트에 맞았을 경우 특정 뼈 이름(NAME_None)이 없으므로,
-                // 맞은 위치(ImpactPoint)에서 가장 가까운 본을 찾아 충격을 전달합니다.
                 if (HitBone == NAME_None)
                 {
                     HitBone = VictimMesh->FindClosestBone(Hit.ImpactPoint);
                 }
-
-                // 메쉬에 직접 물리적 반발력을 주입하면 피지컬 애니메이션이 반응하여 몸이 흔들립니다.
                 VictimMesh->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, HitBone);
             }
         }
-        // 캐릭터 외 일반 물리 시뮬레이션 물체 처리
         else if (OtherComp && OtherComp->IsSimulatingPhysics())
         {
             OtherComp->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, Hit.BoneName);

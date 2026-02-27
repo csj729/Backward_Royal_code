@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GeometryCollection/GeometryCollectionObject.h"
+#include "Sound/SoundBase.h"
 #include "WeaponTypes.generated.h"
 
 // 무기 종류
@@ -62,5 +63,13 @@ struct FWeaponData : public FTableRowBase
     // Initialize Enum to None
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     EWeaponType WeaponType = EWeaponType::None; // 무기 타입
+    
+    // 휘두르는 소리 (붕~, 쉭!)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    USoundBase* SwingSound;
+
+    // 때렸을 때 소리 (퍽!, 챙강!)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    USoundBase* HitSound;
 
 };

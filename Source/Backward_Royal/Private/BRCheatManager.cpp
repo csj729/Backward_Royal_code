@@ -2,6 +2,7 @@
 #include "BRCheatManager.h"
 #include "BRPlayerController.h"
 #include "BRGameMode.h"
+#include "BRGameState.h"
 #include "GameFramework/GameModeBase.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/Engine.h"
@@ -235,5 +236,41 @@ void UBRCheatManager::OpenListenServer()
 			TEXT("Listen Server로 재시작합니다. 맵 로드 후 '방 만들기'를 진행하세요."));
 	}
 	PC->ConsoleCommand(Cmd, /*bExecInEditor=*/false);
+}
+
+void UBRCheatManager::StatServer()
+{
+	APlayerController* PC = GetPlayerController();
+	if (!PC || !PC->GetWorld())
+	{
+		UE_LOG(LogTemp, Error, TEXT("[부하테스트] StatServer: World 없음"));
+		return;
+	}
+	UWorld* World = PC->GetWorld();
+	ENetMode NetMode = World->GetNetMode();
+	if (NetMode != NM_ListenServer && NetMode != NM_DedicatedServer)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[부하테스트] StatServer: 서버가 아님 (NetMode=%d). 호스트/전용서버에서만 유효"), (int32)NetMode);
+		if (GEngine)
+			GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Yellow, TEXT("StatServer: 서버에서만 사용하세요."));
+		return;
+	}
+	int32 PlayerCount = 0;
+	int32 MaxPlayers = 8;
+	if (AGameStateBase* GS = World->GetGameState())
+	{
+		PlayerCount = GS->PlayerArray.Num();
+		if (ABRGameState* BRGS = Cast<ABRGameState>(GS))
+			MaxPlayers = BRGS->MaxPlayers;
+	}
+	FString MapName = UGameplayStatics::GetCurrentLevelName(World, true);
+	if (MapName.IsEmpty())
+		MapName = World->GetMapName();
+
+	FString Msg = FString::Printf(TEXT("[부하테스트] 플레이어 %d/%d | 맵: %s | stat unit / stat net 권장"),
+		PlayerCount, MaxPlayers, *MapName);
+	UE_LOG(LogTemp, Log, TEXT("%s"), *Msg);
+	if (GEngine)
+		GEngine->AddOnScreenDebugMessage(-1, 8.0f, FColor::Cyan, Msg);
 }
 

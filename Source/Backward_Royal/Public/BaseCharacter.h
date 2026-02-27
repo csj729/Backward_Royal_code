@@ -166,6 +166,18 @@ public:
     // 스턴 상태에서 회복될 때 블루프린트에서 실행될 이벤트
     UFUNCTION(BlueprintImplementableEvent, Category = "Status|Stun")
     void OnRecoverFromStun();
+    
+    // [신규] 주먹 휘두르는 소리 (붕~)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    USoundBase* PunchSwingSound;
+
+    // [신규] 주먹에 맞았을 때 소리 (퍽!)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    USoundBase* PunchHitSound;
+    
+    // 주먹 소리 크기 조절
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    float PunchVolume = 1.0f; 
 
 protected:
     bool bIsCharacterAttacking = false;

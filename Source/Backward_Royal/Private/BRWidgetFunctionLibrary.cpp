@@ -433,6 +433,15 @@ ABRGameState* UBRWidgetFunctionLibrary::GetBRGameState(const UObject* WorldConte
 	return World->GetGameState<ABRGameState>();
 }
 
+void UBRWidgetFunctionLibrary::NotifyWidgetIfSpawnReady(const UObject* WorldContextObject, UObject* WidgetTarget, FName EventOrFunctionName)
+{
+	ABRGameState* GS = GetBRGameState(WorldContextObject);
+	if (GS)
+	{
+		GS->NotifyWidgetIfSpawnReady(WidgetTarget, EventOrFunctionName);
+	}
+}
+
 FString UBRWidgetFunctionLibrary::GetRoomTitleForDisplay(const UObject* WorldContextObject)
 {
 	if (!WorldContextObject || !GEngine)

@@ -4,6 +4,7 @@
 #include "BRGameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "GameFramework/PlayerState.h"
+#include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 
 /** 로비 표시용: 비어 있거나 UserUID와 같으면 "Player N"으로 저장. 패턴 없음. */
@@ -29,6 +30,8 @@ void ABRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ABRGameState, bCanStartGame);
 	DOREPLIFETIME(ABRGameState, RoomTitle);
 	DOREPLIFETIME(ABRGameState, WinningTeamNumber);
+	DOREPLIFETIME(ABRGameState, bBodyAssignmentComplete);
+	DOREPLIFETIME(ABRGameState, bAllClientsSpawnReady);
 }
 
 void ABRGameState::BeginPlay()
@@ -657,6 +660,73 @@ void ABRGameState::OnRep_RoomTitle()
 void ABRGameState::OnRep_WinningTeamNumber()
 {
 	// 승리 팀 복제 수신 시 UI 갱신용
+}
+
+void ABRGameState::OnRep_BodyAssignmentComplete()
+{
+	// 클라이언트: 서버에서 bBodyAssignmentComplete 복제 수신 시 델리게이트 브로드캐스트 → 로딩 UI 해제·인게임 UI 표시 등에 사용
+	OnBodyAssignmentComplete.Broadcast();
+}
+
+void ABRGameState::OnRep_AllClientsSpawnReady()
+{
+	UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] 복제 수신 → Broadcast (클라이언트/호스트)"));
+	OnAllClientsSpawnReady.Broadcast();
+}
+
+void ABRGameState::NotifyWidgetIfSpawnReady(UObject* Target, FName EventOrFunctionName)
+{
+	if (!bAllClientsSpawnReady || !Target || EventOrFunctionName.IsNone()) return;
+	if (UFunction* Func = Target->GetClass()->FindFunctionByName(EventOrFunctionName))
+	{
+		UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] NotifyWidgetIfSpawnReady 호출 (Target=%s, Event=%s)"), *Target->GetName(), *EventOrFunctionName.ToString());
+		Target->ProcessEvent(Func, nullptr);
+	}
+}
+
+void ABRGameState::SetExpectedSpawnReadyCount(int32 Count)
+{
+	if (!HasAuthority()) return;
+	UWorld* World = GetWorld();
+	if (World) World->GetTimerManager().ClearTimer(SpawnReadyTimeoutHandle);
+	ExpectedSpawnReadyCount = Count;
+	SpawnReadyControllers.Empty();
+	UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 기대 신호 수: %d"), ExpectedSpawnReadyCount);
+	// 전원 신호가 오지 않을 경우 15초 후 강제로 UI 전환 (네트워크/호스트 미신호 등 대비)
+	if (World && Count > 0)
+	{
+		World->GetTimerManager().SetTimer(SpawnReadyTimeoutHandle, this, &ABRGameState::OnSpawnReadyTimeout, 15.f, false);
+	}
+}
+
+void ABRGameState::OnSpawnReadyTimeout()
+{
+	if (!HasAuthority() || bAllClientsSpawnReady) return;
+	UE_LOG(LogTemp, Warning, TEXT("[스폰 완료] 타임아웃 (%d/%d) → 강제 UI 전환"), SpawnReadyControllers.Num(), ExpectedSpawnReadyCount);
+	bAllClientsSpawnReady = true;
+	UE_LOG(LogTemp, Warning, TEXT("[OnAllClientsSpawnReady] Broadcast (서버, 타임아웃)"));
+	OnAllClientsSpawnReady.Broadcast();
+}
+
+void ABRGameState::ReportClientSpawnReady(APlayerController* PC)
+{
+	if (!HasAuthority() || !PC) return;
+	if (ExpectedSpawnReadyCount <= 0) return;
+	if (SpawnReadyControllers.Contains(PC)) return;
+
+	SpawnReadyControllers.Add(PC);
+	const int32 NumReady = SpawnReadyControllers.Num();
+	UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 클라이언트 신호 수신 (%d/%d)"), NumReady, ExpectedSpawnReadyCount);
+
+	if (NumReady >= ExpectedSpawnReadyCount)
+	{
+		if (UWorld* World = GetWorld())
+			World->GetTimerManager().ClearTimer(SpawnReadyTimeoutHandle);
+		bAllClientsSpawnReady = true;
+		UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] Broadcast (서버, 전원 수신)"));
+		OnAllClientsSpawnReady.Broadcast();
+		UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 전원 수신 완료 → UI 전환·입력 허용"));
+	}
 }
 
 void ABRGameState::EndGameWithWinner(int32 WinnerTeamNumber)

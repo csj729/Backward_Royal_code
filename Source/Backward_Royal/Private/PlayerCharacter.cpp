@@ -2,6 +2,7 @@
 #include "GameFramework/SpringArmComponent.h"
 #include "Camera/CameraComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 #include "Components/SceneComponent.h"
 #include "Components/CapsuleComponent.h"	
 #include "EnhancedInputComponent.h"
@@ -243,6 +244,26 @@ void APlayerCharacter::HandleStaminaChanged(float CurrentVal, float MaxVal)
 
 void APlayerCharacter::Move(const FInputActionValue& Value)
 {
+	// [로딩 중 키보드 비인식 기능 주석 처리]
+	// UWorld* World = GetWorld();
+	// ABRGameState* GS = World ? World->GetGameState<ABRGameState>() : nullptr;
+	// // 전원 스폰 완료 신호 전까지 이동 입력 무시 (서버가 bAllClientsSpawnReady 브로드캐스트할 때까지)
+	// if (GS && !GS->bAllClientsSpawnReady)
+	// 	return;
+	// // 전원 스폰 완료 후 1회만 컨트롤러 이동 입력 해제 (델리게이트 콜백 미호출 시 폴백)
+	// if (!bMoveInputUnblocked && GS && GS->bAllClientsSpawnReady && Controller)
+	// {
+	// 	if (APlayerController* PC = Cast<APlayerController>(Controller))
+	// 	{
+	// 		PC->ResetIgnoreMoveInput();
+	// 		PC->SetIgnoreMoveInput(false);
+	// 		FInputModeGameOnly GameMode;
+	// 		PC->SetInputMode(GameMode);
+	// 		PC->bShowMouseCursor = false;
+	// 		bMoveInputUnblocked = true;
+	// 	}
+	// }
+
 	FVector2D MovementVector = Value.Get<FVector2D>();
 
 	if (Controller != nullptr)
@@ -292,6 +313,15 @@ void APlayerCharacter::Look(const FInputActionValue& Value)
 
 void APlayerCharacter::Jump()
 {
+	// [로딩 중 키보드 비인식 기능 주석 처리]
+	// // 전원 스폰 완료 전에는 점프(이동) 입력 무시
+	// if (UWorld* World = GetWorld())
+	// {
+	// 	if (ABRGameState* GS = World->GetGameState<ABRGameState>())
+	// 	{
+	// 		if (!GS->bAllClientsSpawnReady) return;
+	// 	}
+	// }
 	// 스태미나가 충분할 때만 점프 시도 (불필요한 입력 방지)
 	if (StaminaComp && StaminaComp->CanJump())
 	{
@@ -668,40 +698,62 @@ void APlayerCharacter::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	// [로딩 중 키보드 비인식 기능 주석 처리]
+	// // 전원 스폰 완료 시 로컬 하체 플레이어의 이동 입력 1회 해제 (키가 UI에 잡혀 Move()가 호출되지 않아도 Tick에서 처리)
+	// if (!bMoveInputUnblocked && IsLocallyControlled())
+	// {
+	// 	UWorld* World = GetWorld();
+	// 	ABRGameState* GS = World ? World->GetGameState<ABRGameState>() : nullptr;
+	// 	if (GS && GS->bAllClientsSpawnReady && Controller)
+	// 	{
+	// 		if (APlayerController* PC = Cast<APlayerController>(Controller))
+	// 		{
+	// 			PC->ResetIgnoreMoveInput();
+	// 			PC->SetIgnoreMoveInput(false);
+	// 			FInputModeGameOnly GameMode;
+	// 			PC->SetInputMode(GameMode);
+	// 			PC->bShowMouseCursor = false;
+	// 			bMoveInputUnblocked = true;
+	// 		}
+	// 	}
+	// }
+
 	// 발자국 소리 로직 실행
 	ProcessFootstep(DeltaTime);
 }
+
 void APlayerCharacter::ProcessFootstep(float DeltaTime)
 {
-	// 1. 현재 공중에 떠 있는지 확인 (점프 중엔 소리 X)
-	if (GetCharacterMovement()->IsFalling()) 
+	// 1. 소리 파일이 없으면 실행 안 함
+	if (!FootstepSound) return;
+
+	// 2. 공중에 떠 있거나(점프 중), 수영 중이면 소리 안 남
+	if (GetCharacterMovement()->IsFalling() || GetCharacterMovement()->IsSwimming()) 
 	{
-		AccumulatedDistance = 0.0f; // 착지 시 바로 소리 나게 하거나, 0으로 초기화
+		AccumulatedDistance = 0.0f; 
 		return;
 	}
 
-	// 2. 현재 속도(Velocity) 가져오기 (Z축 제외, 수평 이동만 계산)
+	// 3. 현재 속도(Velocity) 가져오기 (Z축 제외, 수평 이동만 계산)
 	FVector Velocity = GetVelocity();
 	Velocity.Z = 0.0f;
 	float Speed = Velocity.Size();
 
-	// 3. 멈춰있으면(속도가 거의 0이면) 계산 중단
+	// 4. 멈춰있으면(속도가 10 미만) 계산 중단
 	if (Speed < 10.0f) return;
 
-	// 4. 이동 거리 누적 (속도 * 시간 = 거리)
+	// 5. 이동 거리 누적 (속도 * 시간 = 거리)
 	AccumulatedDistance += Speed * DeltaTime;
 
-	// 5. 누적 거리가 설정한 간격(Threshold)을 넘었는지 확인
+	// 6. 누적 거리가 설정한 간격(Threshold)을 넘었는지 확인
 	if (AccumulatedDistance >= FootstepDistanceThreshold)
 	{
-		// 소리 재생
-		if (FootstepSound)
-		{
-			UGameplayStatics::PlaySoundAtLocation(this, FootstepSound, GetActorLocation());
-		}
+		// [수정됨] 소리 재생 (볼륨 적용)
+		// PlaySoundAtLocation(WorldContextObject, Sound, Location, VolumeMultiplier, PitchMultiplier...)
+		// 네 번째 인자에 FootstepVolume을 넣어줍니다.
+		UGameplayStatics::PlaySoundAtLocation(this, FootstepSound, GetActorLocation(), FootstepVolume);
 
-		// 6. 누적 거리 초기화 (나머지 값은 남겨둠으로써 오차 보정)
-		// 예: 155 이동 -> 150 차감 -> 5 남김 (다음 발자국이 조금 더 빨리 울리게 자연스럽게 처리)
+		// 7. 누적 거리 초기화 (나머지 값은 남겨두어 박자 밀림 방지)
 		AccumulatedDistance -= FootstepDistanceThreshold;
 	}
 }

@@ -125,6 +125,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (WorldContext = "WorldContextObject"))
 	static ABRGameState* GetBRGameState(const UObject* WorldContextObject);
 
+	/** 이미 전원 스폰 완료 상태면 위젯의 Custom Event 호출. Construct에서 OnAllClientsSpawnReady 바인딩 직후 호출용. (호출 대상 혼동 방지를 위해 라이브러리 함수로 제공) */
+	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (WorldContext = "WorldContextObject", DisplayName = "Notify If Spawn Ready"))
+	static void NotifyWidgetIfSpawnReady(const UObject* WorldContextObject, UObject* WidgetTarget, FName EventOrFunctionName);
+
 	/** 로비 방 제목 "○○'s Game" 표시용. 캐시(RPC) 우선, 없으면 GameState (입장 직후 즉시 표시) */
 	UFUNCTION(BlueprintCallable, Category = "BR Widget|GameState", meta = (WorldContext = "WorldContextObject"))
 	static FString GetRoomTitleForDisplay(const UObject* WorldContextObject);

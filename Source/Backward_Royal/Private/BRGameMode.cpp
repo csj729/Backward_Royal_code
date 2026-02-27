@@ -159,14 +159,25 @@ void ABRGameMode::PreLogin(const FString& Options, const FString& Address, const
 	Super::PreLogin(Options, Address, UniqueId, ErrorMessage);
 	if (!ErrorMessage.IsEmpty()) return;
 
-	// 게임 진행 중 입장 차단이 꺼져 있으면 통과
-	if (!bBlockJoinWhenGameStarted) return;
-
 	UWorld* World = GetWorld();
 	if (!World || World->GetNetMode() == NM_Standalone)
 	{
 		return; // 단일 플레이어/로컬에서는 차단하지 않음
 	}
+
+	// 최대 인원 초과 시 입장 거부 (서버 보안)
+	if (ABRGameState* BRGameState = GetGameState<ABRGameState>())
+	{
+		if (BRGameState->PlayerArray.Num() >= MaxPlayers)
+		{
+			ErrorMessage = FString::Printf(TEXT("방 인원이 가득 찼습니다. (%d/%d)"), BRGameState->PlayerArray.Num(), MaxPlayers);
+			UE_LOG(LogTemp, Warning, TEXT("[PreLogin] 최대 인원 초과로 입장 거부 (현재 %d/%d)"), BRGameState->PlayerArray.Num(), MaxPlayers);
+			return;
+		}
+	}
+
+	// 게임 진행 중 입장 차단이 꺼져 있으면 통과
+	if (!bBlockJoinWhenGameStarted) return;
 
 	// 현재 맵이 로비 맵이면 항상 입장 허용
 	FString CurrentMapName = UGameplayStatics::GetCurrentLevelName(World, true);
@@ -825,6 +836,15 @@ void ABRGameMode::ApplyRoleChangesForRandomTeams_ApplyOneTeam()
 		if (StagedUpperBodiesSpawnedCount == 0)
 			UE_LOG(LogTemp, Warning, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료 but 상체 0명 스폰됨 (하체만 스폰된 상태일 수 있음)"));
 		UE_LOG(LogTemp, Log, TEXT("[랜덤 팀 적용] 순차 상체 스폰 완료 (고정 규칙: 하체 %d명, 상체 %d명 / 실제 상체 스폰 %d명)"), StagedNumTeams, StagedNumTeams, StagedUpperBodiesSpawnedCount);
+
+		if (ABRGameState* BRGS = GetGameState<ABRGameState>())
+		{
+			BRGS->bBodyAssignmentComplete = true;
+			BRGS->OnBodyAssignmentComplete.Broadcast();
+			// 전원 스폰 완료 신호를 기다림. ReportClientSpawnReady는 컨트롤러당 1회만 집계하므로 기대 개수 = 플레이어(팀) 수
+			BRGS->SetExpectedSpawnReadyCount(StagedNumTeams);
+		}
+
 		StagedSortedByTeam.Empty();
 		StagedNumTeams = 0;
 		StagedCurrentTeamIndex = 0;
@@ -1279,6 +1299,7 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 	// 캐릭터에서 Controller 가져오기 (없으면 PlayerState에서 시도 — 하체/상체 공유 폰 등)
 	AController* Controller = VictimCharacter->GetController();
 	ABRPlayerState* PS = nullptr;
+
 	if (Controller)
 	{
 		PS = Controller->GetPlayerState<ABRPlayerState>();
@@ -1308,8 +1329,7 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 	}
 
 	// -----------------------------------------------------------
-	// 팀 탈락: 같은 팀 파트너도 사망 처리 후, 2초 뒤 피해자·파트너(하체+상체) 둘 다 관전 전환
-	// (인덱스로 예약해 콜백에서 팀 번호 복제 이슈 없이 전원 전환 보장)
+	// [수정] 팀 탈락: 파트너 찾기 (ConnectedPlayerIndex 우선 사용 + 팀 번호 백업)
 	// -----------------------------------------------------------
 	ABRGameState* GS = GetGameState<ABRGameState>();
 	if (!GS || !PS)
@@ -1325,31 +1345,73 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 		return;
 	}
 
-	int32 PartnerPlayerIndex = INDEX_NONE;
-	for (APlayerState* OtherPS : GS->PlayerArray)
+	// 1. 먼저 '연결된 인덱스'로 파트너를 찾습니다. (가장 정확함)
+	int32 PartnerPlayerIndex = PS->ConnectedPlayerIndex;
+	ABRPlayerState* TargetPartnerPS = nullptr; // [수정] 변수명 변경 (PartnerPS -> TargetPartnerPS)
+
+	if (PartnerPlayerIndex != INDEX_NONE && GS->PlayerArray.IsValidIndex(PartnerPlayerIndex))
 	{
-		ABRPlayerState* BRPS = Cast<ABRPlayerState>(OtherPS);
-		if (BRPS && BRPS != PS && BRPS->TeamNumber == PS->TeamNumber)
+		TargetPartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[PartnerPlayerIndex]);
+	}
+
+	// 2. 만약 인덱스로 못 찾았다면, 기존 방식(팀 번호)으로 백업 검색합니다.
+	if (!TargetPartnerPS)
+	{
+		for (int32 i = 0; i < GS->PlayerArray.Num(); ++i)
 		{
-			PartnerPlayerIndex = GS->PlayerArray.Find(BRPS);
-			if (BRPS->CurrentStatus != EPlayerStatus::Dead)
+			ABRPlayerState* OtherPS = Cast<ABRPlayerState>(GS->PlayerArray[i]);
+			if (OtherPS && OtherPS != PS && OtherPS->TeamNumber == PS->TeamNumber && PS->TeamNumber > 0)
 			{
-				BRPS->SetPlayerStatus(EPlayerStatus::Dead);
+				TargetPartnerPS = OtherPS;
+				PartnerPlayerIndex = i;
+				break;
 			}
-			// 파트너도 PlayerState를 관전(PlayerIndex 0)으로 변경
-			BRPS->SetSpectator(true);
-			break;
 		}
+	}
+
+	// 3. 찾은 파트너를 확실하게 사망 처리합니다.
+	if (TargetPartnerPS)
+	{
+		if (TargetPartnerPS->CurrentStatus != EPlayerStatus::Dead)
+		{
+			TargetPartnerPS->SetPlayerStatus(EPlayerStatus::Dead);
+		}
+		// 파트너도 PlayerState를 관전(PlayerIndex 0)으로 변경
+		TargetPartnerPS->SetSpectator(true);
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 파트너(%s)도 함께 사망 처리됨."), *TargetPartnerPS->GetPlayerName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 파트너를 찾지 못했습니다. (ConnectedIndex: %d, Team: %d)"), PS->ConnectedPlayerIndex, PS->TeamNumber);
 	}
 
 	// 생존 팀 확인 및 우승 처리
 	CheckMatchWinner();
 
+	// [수정] Victim과 Partner의 Controller를 각각 독립적으로 찾아서 WeakPtr로 바인딩
+	// Victim이 나가더라도 Partner는 정상적으로 관전 전환됨
+	ABRPlayerController* VictimPC = Cast<ABRPlayerController>(PS->GetOwningController());
+
+	ABRPlayerController* PartnerPC = nullptr;
+	if (GS->PlayerArray.IsValidIndex(PartnerPlayerIndex))
+	{
+		if (APlayerState* PartnerPS = GS->PlayerArray[PartnerPlayerIndex])
+		{
+			PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwningController());
+		}
+	}
+
+	TWeakObjectPtr<ABRPlayerController> WeakVictimPC = VictimPC;
+	TWeakObjectPtr<ABRPlayerController> WeakPartnerPC = PartnerPC;
+
 	FTimerDelegate TimerDel;
-	TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectatorByPlayerIndices, VictimPlayerIndex, PartnerPlayerIndex);
+	TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectator, WeakVictimPC, WeakPartnerPC);
 	GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle_DeathSpectator, TimerDel, 2.0f, false);
-	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 2초 후 하체·상체 관전 전환 예약 (VictimIdx=%d, PartnerIdx=%d)"),
-		PS->TeamNumber, VictimPlayerIndex, PartnerPlayerIndex);
+
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 2초 후 하체·상체 관전 전환 예약 (Victim: %s, Partner: %s)"),
+		PS->TeamNumber,
+		VictimPC ? *VictimPC->GetName() : TEXT("None"),
+		PartnerPC ? *PartnerPC->GetName() : TEXT("None"));
 }
 
 void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> VictimPC, TWeakObjectPtr<ABRPlayerController> PartnerPC)
@@ -1363,6 +1425,9 @@ void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> Vict
 	{
 		PartnerPC->StartSpectatingMode();
 	}
+
+	CheckMatchWinner(); // 우승 조건 재확인
+
 }
 
 void ABRGameMode::SwitchTeamToSpectatorByPlayerIndices(int32 VictimPlayerIndex, int32 PartnerPlayerIndex)

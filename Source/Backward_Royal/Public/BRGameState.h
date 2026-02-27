@@ -3,6 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "TimerManager.h"
 #include "BRUserInfo.h"
 #include "BRGameState.generated.h"
 
@@ -11,6 +12,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnTeamChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnGameEndedWithWinner, int32, WinningTeamNumber);
 /** 매치 종료 시 (위치, 상체 이름, 하체 이름). MulticastMatchEnded에서 브로드캐스트 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnMatchEnded, FVector, WinnerLocation, FString, UpperName, FString, LowerName);
+
+/** 전체 플레이어 상하체 배정이 완료되었을 때 (퍼즈 해제·UI 표시 등에 사용) */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBodyAssignmentComplete);
+
+/** 모든 클라이언트가 스폰 완료 신호를 보낸 뒤 서버가 브로드캐스트. UI 전환·입력 해제 시점 */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnAllClientsSpawnReady);
 
 UCLASS()
 class BACKWARD_ROYAL_API ABRGameState : public AGameStateBase
@@ -52,6 +59,14 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_WinningTeamNumber, BlueprintReadOnly, Category = "Game")
 	int32 WinningTeamNumber = 0;
 
+	/** [서버 설정 → 복제] 상하체 배정이 모두 끝나면 true. 클라이언트는 RepNotify로 수신 후 OnBodyAssignmentComplete 브로드캐스트 */
+	UPROPERTY(ReplicatedUsing = OnRep_BodyAssignmentComplete, BlueprintReadOnly, Category = "Game")
+	bool bBodyAssignmentComplete = false;
+
+	/** [서버 설정 → 복제] 모든 클라이언트가 ServerReportSpawnReady를 보낸 뒤 true. UI 전환·이동 입력 허용 시점 */
+	UPROPERTY(ReplicatedUsing = OnRep_AllClientsSpawnReady, BlueprintReadOnly, Category = "Game")
+	bool bAllClientsSpawnReady = false;
+
 	// 플레이어 목록 변경 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerListChanged OnPlayerListChanged;
@@ -71,6 +86,21 @@ public:
 	// 매치 종료(우승 팀 결정) 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnMatchEnded OnMatchEnded;
+
+	/** 전체 플레이어 상하체 배정 완료 시 브로드캐스트. 퍼즈 해제·입력 활성화·UI 표시 등에 바인딩 */
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnBodyAssignmentComplete OnBodyAssignmentComplete;
+
+	/** 모든 클라이언트 스폰 완료 수신 후 브로드캐스트. 인게임 UI 전환·이동 입력 허용에 바인딩 */
+	UPROPERTY(BlueprintAssignable, Category = "Events")
+	FOnAllClientsSpawnReady OnAllClientsSpawnReady;
+
+	/** 블루프린트 위젯용: 이미 전원 스폰 완료(bAllClientsSpawnReady) 상태면 Object에 지정한 이벤트/함수 호출.
+	 *  Construct에서 OnAllClientsSpawnReady 바인딩한 뒤 이 함수를 호출하면, 복제가 먼저 와서 이벤트를 놓친 경우에도 UI 전환이 됨.
+	 *  @param Target 바인딩한 위젯(self 등)
+	 *  @param EventOrFunctionName 위젯에 있는 Custom Event 또는 함수 이름 (예: "OnSpawnReadyForUI") */
+	UFUNCTION(BlueprintCallable, Category = "Game", meta = (DisplayName = "Notify If Spawn Ready"))
+	void NotifyWidgetIfSpawnReady(UObject* Target, FName EventOrFunctionName);
 
 	// [서버->클라이언트] 매치 종료 이벤트를 모든 클라이언트에게 전파
 	UFUNCTION(NetMulticast, Reliable)
@@ -160,6 +190,20 @@ public:
 	UFUNCTION()
 	void OnRep_WinningTeamNumber();
 
+	/** 상하체 배정 완료 복제 수신 시 호출 (클라이언트에서 로딩 UI→인게임 UI 전환용, 델리게이트 브로드캐스트) */
+	UFUNCTION()
+	void OnRep_BodyAssignmentComplete();
+
+	/** 모든 클라이언트 스폰 완료 복제 수신 시 호출 (UI 전환·이동 입력 허용) */
+	UFUNCTION()
+	void OnRep_AllClientsSpawnReady();
+
+	/** [서버 전용] 기대 스폰 완료 신호 개수 설정 (상하체 배정 완료 시 팀 수*2 호출) */
+	void SetExpectedSpawnReadyCount(int32 Count);
+
+	/** [서버 전용] 클라이언트가 스폰 완료 RPC 보냈을 때 호출. 전원 수신 시 bAllClientsSpawnReady = true 및 브로드캐스트 */
+	void ReportClientSpawnReady(class APlayerController* PC);
+
 	/** [서버 전용] 승리 팀 설정 후 게임 종료 처리. WinningTeamNumber 설정 및 OnGameEndedWithWinner 브로드캐스트 */
 	void EndGameWithWinner(int32 WinnerTeamNumber);
 
@@ -171,5 +215,13 @@ public:
 protected:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void BeginPlay() override;
+
+	/** [서버 전용] 스폰 완료 신호를 기대하는 컨트롤러 수 (플레이어/팀 수). 복제 안 함 */
+	int32 ExpectedSpawnReadyCount = 0;
+	/** [서버 전용] 이미 스폰 완료 신호를 보낸 컨트롤러. 중복 카운트 방지 */
+	TSet<class APlayerController*> SpawnReadyControllers;
+	/** [서버 전용] 전원 신호 대기 타임아웃. 만료 시 강제로 bAllClientsSpawnReady 처리 */
+	FTimerHandle SpawnReadyTimeoutHandle;
+	void OnSpawnReadyTimeout();
 };
 
