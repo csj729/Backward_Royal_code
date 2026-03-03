@@ -123,7 +123,10 @@ public:
     FDeathDamageInfo LastDeathInfo;
 
     UFUNCTION(NetMulticast, Reliable)
-    void PerformDeathVisuals();
+    void MulticastPerformDeathVisuals(FVector KillImpulse, FVector HitLocation, FVector ServerLoc, FRotator ServerRot);
+
+    UFUNCTION(NetMulticast, Unreliable)
+    void MulticastPlayPhysicalHitReaction(FVector Impulse, FVector HitLocation, FName BoneName);
 
     // --- Weapon ---
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat", Replicated)

@@ -421,7 +421,17 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 		else
 		{
 			SetupRoleInput(true, aPawn); // 하체: 이동 키 매핑 등록
-			SetIgnoreMoveInput(true);    // 로딩 UI 동안 키보드 인식 안 되게
+			// 테스트 맵 직접 실행 시 로딩 창 없음 → 키보드 즉시 허용
+			if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr; GS && GS->bSkipLoadingScreen)
+			{
+				FInputModeGameOnly GameInputMode;
+				SetInputMode(GameInputMode);
+				bShowMouseCursor = false;
+				ResetIgnoreMoveInput();
+				SetIgnoreMoveInput(false);
+			}
+			else
+				SetIgnoreMoveInput(true);    // 로딩 UI 동안 키보드 인식 안 되게
 		}
 	}
 
@@ -472,6 +482,23 @@ void ABRPlayerController::OnAllClientsSpawnReadyCallback()
 	}
 }
 
+void ABRPlayerController::TryUnblockInputIfSkipLoadingScreen()
+{
+	if (!IsLocalController() || HasAuthority()) return;
+	APawn* P = GetPawn();
+	if (!P || P->IsA<AUpperBodyPawn>()) return;
+	ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+	if (!GS || !GS->bSkipLoadingScreen) return;
+	// 복제가 도착한 뒤 bSkipLoadingScreen이 true → 테스트 맵 직접 실행이므로 입력 해제
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(SkipLoadingScreenCheckHandle);
+	FInputModeGameOnly GameInputMode;
+	SetInputMode(GameInputMode);
+	bShowMouseCursor = false;
+	ResetIgnoreMoveInput();
+	SetIgnoreMoveInput(false);
+	UE_LOG(LogTemp, Log, TEXT("[맵 직접 실행] 클라이언트 bSkipLoadingScreen 복제 수신 → 이동 입력 해제"));
+}
+
 void ABRPlayerController::AcknowledgePossession(APawn* P)
 {
 	Super::AcknowledgePossession(P);
@@ -484,11 +511,29 @@ void ABRPlayerController::AcknowledgePossession(APawn* P)
 		ServerReportSpawnReady();
 	}
 
-	// 클라이언트: 상체가 아니면 하체로 간주하고 이동 키 매핑 등록. 로딩 UI 동안 키보드 비인식
+	// 클라이언트: 상체가 아니면 하체로 간주하고 이동 키 매핑 등록. 테스트 맵 직접 실행 시에는 키보드 즉시 허용
 	if (!HasAuthority() && IsLocalController() && P && !P->IsA<AUpperBodyPawn>())
 	{
 		SetupRoleInput(true, P);
-		SetIgnoreMoveInput(true);
+		ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr;
+		if (GS && GS->bSkipLoadingScreen)
+		{
+			FInputModeGameOnly GameInputMode;
+			SetInputMode(GameInputMode);
+			bShowMouseCursor = false;
+			ResetIgnoreMoveInput();
+			SetIgnoreMoveInput(false);
+		}
+		else
+		{
+			SetIgnoreMoveInput(true);  // 로딩 UI 동안 키보드 비인식
+			// bSkipLoadingScreen은 서버에서 복제되므로 클라이언트에 늦게 도착할 수 있음 → 0.5초 후 재확인
+			if (UWorld* W = GetWorld())
+			{
+				W->GetTimerManager().ClearTimer(SkipLoadingScreenCheckHandle);
+				W->GetTimerManager().SetTimer(SkipLoadingScreenCheckHandle, this, &ABRPlayerController::TryUnblockInputIfSkipLoadingScreen, 0.5f, false);
+			}
+		}
 	}
 
 	// 로딩 완료 시 이동 입력 해제용 델리게이트 바인딩

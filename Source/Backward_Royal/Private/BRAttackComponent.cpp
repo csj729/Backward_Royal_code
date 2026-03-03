@@ -187,22 +187,16 @@ void UBRAttackComponent::MulticastPlayHitSound_Implementation(USoundBase* SoundT
 
 void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit)
 {
-    // 1. 안전 장치 (튕김 방지)
-    AActor* OwnerActor = GetOwner();
-    if (!IsValid(OwnerActor)) return;
-
-    ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(OwnerActor);
-    if (!IsValid(OwnerChar)) return;
-
+    ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
     ABaseWeapon* MyWeapon = OwnerChar->CurrentWeapon;
 
     if (HitActors.Contains(OtherActor)) return;
 
-    // 2. 충격량 계산 (Clamp 적용)
+    // [수정] 피지컬 애니메이션 적용 시 무기 충돌 반발력이 수십만 단위로 폭증하여 무기가 즉시 파괴되는 현상 방지를 위해 제한(Clamp)
     float ImpactForce = FMath::Clamp(NormalImpulse.Size(), 0.0f, 5000.0f);
     float ImpulseMultiplier = 1.0f;
 
-    if (IsValid(MyWeapon))
+    if (MyWeapon)
     {
         ImpulseMultiplier = ABaseWeapon::GlobalImpulseMultiplier * MyWeapon->CurrentWeaponData.MassKg * MyWeapon->CurrentWeaponData.ImpulseCoefficient;
     }
@@ -214,79 +208,59 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
 
     FVector FinalImpulseVector = ImpulseDir * FinalImpulsePower;
 
-    // 3. 충격량 정보 전달 (피격자에게)
+    // [충격량 미리 주입]
     if (ABaseCharacter* Victim = Cast<ABaseCharacter>(OtherActor))
     {
         Victim->SetLastHitInfo(FinalImpulseVector, Hit.ImpactPoint);
     }
 
-    // 4. 데미지 계산
+    // [데미지 계산]
     float CalculatedDamage = 0.0f;
-    if (IsValid(MyWeapon))
+    if (MyWeapon)
     {
         CalculatedDamage = ImpactForce * MyWeapon->CurrentWeaponData.DamageCoefficient * MyWeapon->CurrentWeaponData.MassKg * ABaseWeapon::GlobalDamageMultiplier * 0.001f;
     }
     else
     {
-        // [안전 처리] Global_BasePunchDamage 변수가 없다면 10.0f 기본값 사용
-        float BaseDamage = 10.0f; 
-        // 만약 헤더에 Global_BasePunchDamage가 있다면 위 줄을 지우고 사용하세요.
-        CalculatedDamage = (ImpactForce * 0.001f) + BaseDamage;
+        // [수정] 맨손 공격 시 기본 데미지 10 추가
+        CalculatedDamage = (ImpactForce * 0.001f) + Global_BasePunchDamage;
     }
 
     // 디버그 출력
     if (GEngine)
     {
-        FString DebugMsg = FString::Printf(TEXT("Hit: %s | Dmg: %.1f"), *OtherActor->GetName(), CalculatedDamage);
+        FString DebugMsg = FString::Printf(TEXT("Hit: %s | Dmg: %.1f | Impulse: %.0f"),
+            *OtherActor->GetName(), CalculatedDamage, FinalImpulsePower);
         GEngine->AddOnScreenDebugMessage(-1, 3.0f, FColor::Yellow, DebugMsg);
+
+        ATK_LOG(Log, TEXT("Target: %s, Damage: %.1f, Impulse: %.1f"), *OtherActor->GetName(), CalculatedDamage, FinalImpulsePower);
     }
 
-    // 5. 유효타 처리 (데미지 적용 및 소리 재생)
+    // 유효타 처리
     if (CalculatedDamage >= 3.0f)
     {
-        UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, OwnerChar->GetController(), OwnerChar, nullptr);
-        
-        if (IsValid(MyWeapon))
-        {
-            // 무기 내구도 감소
-            MyWeapon->DecreaseDurability(CalculatedDamage);
+        UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
 
-            // [신규] 무기 타격음 재생 (멀티캐스트)
-            if (MyWeapon->CurrentWeaponData.HitSound)
-            {
-                // 모든 클라이언트에게 소리 재생 명령
-                MulticastPlayHitSound(MyWeapon->CurrentWeaponData.HitSound, Hit.ImpactPoint, 1.0f);
-            }
-        }
-        else 
+        if (MyWeapon)
         {
-            // [신규] 맨손 타격음 재생 (멀티캐스트)
-            if (IsValid(OwnerChar) && OwnerChar->PunchHitSound)
-            {
-                MulticastPlayHitSound(OwnerChar->PunchHitSound, Hit.ImpactPoint, OwnerChar->PunchVolume);
-            }
+            MyWeapon->DecreaseDurability(CalculatedDamage);
         }
     }
 
-    // 6. 히트 스탑 및 물리 반발력 적용
+    // 공격 성공 시 히트 스탑 적용 (0.1초 멈춤 -> 이후 애니메이션 종료)
     MulticastApplyHitStop(0.1f);
 
-    if (OwnerChar->HasAuthority())
+    if (GetOwner()->HasAuthority())
     {
         if (ABaseCharacter* VictimChar = Cast<ABaseCharacter>(OtherActor))
         {
-            if (USkeletalMeshComponent* VictimMesh = VictimChar->GetMesh())
-            {
-                FName HitBone = Hit.BoneName;
-                if (HitBone == NAME_None)
-                {
-                    HitBone = VictimMesh->FindClosestBone(Hit.ImpactPoint);
-                }
-                VictimMesh->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, HitBone);
-            }
+            // [핵심] 피지컬 애니메이션 흔들림은 멀티캐스트를 통해 모든 화면에서 실행
+            VictimChar->MulticastPlayPhysicalHitReaction(FinalImpulseVector, Hit.ImpactPoint, Hit.BoneName);
         }
+        // 캐릭터 외 일반 물리 시뮬레이션 물체 처리
         else if (OtherComp && OtherComp->IsSimulatingPhysics())
         {
+            // 일반 프롭들도 멀티캐스트로 처리해야 완벽하지만, 기본적으로 Replicate Movement가 켜져 있다면 서버가 밀어냅니다.
             OtherComp->AddImpulseAtLocation(FinalImpulseVector, Hit.ImpactPoint, Hit.BoneName);
         }
     }

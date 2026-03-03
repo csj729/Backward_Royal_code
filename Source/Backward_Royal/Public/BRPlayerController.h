@@ -319,5 +319,9 @@ private:
 	UFUNCTION()
 	void OnAllClientsSpawnReadyCallback();
 	bool bSpawnReadyDelegateBound = false;
+
+	/** 클라이언트: bSkipLoadingScreen 복제 지연 시 0.5초 후 재확인하여 입력 해제 (테스트 맵 직접 실행) */
+	FTimerHandle SkipLoadingScreenCheckHandle;
+	void TryUnblockInputIfSkipLoadingScreen();
 };
 

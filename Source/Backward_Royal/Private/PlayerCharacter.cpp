@@ -268,6 +268,19 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 
 	if (Controller != nullptr)
 	{
+		// 테스트 맵 직접 실행 시 컨트롤러 이동 차단이 남아 있으면 WASD가 무시됨(점프만 됨). 여기서 해제하고 bForce로 이동 적용
+		bool bForceMove = false;
+		if (ABRPlayerController* PC = Cast<ABRPlayerController>(Controller))
+		{
+			UWorld* W = GetWorld();
+			if (ABRGameState* GS = W ? W->GetGameState<ABRGameState>() : nullptr; GS && GS->bSkipLoadingScreen)
+			{
+				PC->ResetIgnoreMoveInput();
+				PC->SetIgnoreMoveInput(false);
+				bForceMove = true;
+			}
+		}
+
 		const FRotator Rotation = Controller->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);
 
@@ -295,9 +308,9 @@ void APlayerCharacter::Move(const FInputActionValue& Value)
 		}
 		// [신규 로직 끝] ------------------------------------------------------------
 
-		// 계산된 배율(SpeedScale)을 곱해서 이동 적용
-		AddMovementInput(CameraForward, MovementVector.Y * SpeedScale);
-		AddMovementInput(CameraRight, MovementVector.X * SpeedScale);
+		// 계산된 배율(SpeedScale)을 곱해서 이동 적용. bForce=true면 IsMoveInputIgnored() 무시하고 이동 적용(테스트 맵 직접 실행용)
+		AddMovementInput(CameraForward, MovementVector.Y * SpeedScale, bForceMove);
+		AddMovementInput(CameraRight, MovementVector.X * SpeedScale, bForceMove);
 	}
 }
 

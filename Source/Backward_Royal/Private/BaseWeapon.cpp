@@ -222,6 +222,9 @@ void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& S
 {
     if (CurrentWeaponData.FracturedMesh)
     {
+        FActorSpawnParameters SpawnParams;
+        SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
         AGeometryCollectionActor* FracturedActor = GetWorld()->SpawnActorDeferred<AGeometryCollectionActor>(
             AGeometryCollectionActor::StaticClass(),
             SpawnTransform
