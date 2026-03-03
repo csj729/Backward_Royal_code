@@ -12,7 +12,6 @@ DEFINE_LOG_CATEGORY_STATIC(LogBaseWeapon, Display, All);
     UE_LOG(LogBaseWeapon, Verbosity, TEXT("%s - %s"), *FString(__FUNCTION__), *FString::Printf(TEXT(Format), ##__VA_ARGS__))
 
 // static 변수 초기화 (기본값 1.0)
-
 float ABaseWeapon::GlobalDamageMultiplier = 1.0f;
 float ABaseWeapon::GlobalImpulseMultiplier = 1.0f;
 float ABaseWeapon::GlobalAttackSpeedMultiplier = 1.0f;
@@ -20,11 +19,11 @@ float ABaseWeapon::GlobalDurabilityReduction = 10.0f;
 
 ABaseWeapon::ABaseWeapon()
 {
-    PrimaryActorTick.bCanEverTick = false;  
+    PrimaryActorTick.bCanEverTick = false;
     WeaponMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WeaponMesh"));
     RootComponent = WeaponMesh;
 
-    // 기본 충돌 및 물리 설정 (기존과 동일)
+    // 기본 충돌 및 물리 설정
     WeaponMesh->SetNotifyRigidBodyCollision(true);
     WeaponMesh->SetCollisionProfileName(TEXT("Custom"));
     WeaponMesh->SetSimulatePhysics(true);
@@ -43,7 +42,6 @@ ABaseWeapon::ABaseWeapon()
     WeaponMesh->SetIsReplicated(true);
 }
 
-// 에디터에서 수치(RowName 등) 변경 시 즉시 반영
 void ABaseWeapon::OnConstruction(const FTransform& Transform)
 {
     Super::OnConstruction(Transform);
@@ -53,8 +51,6 @@ void ABaseWeapon::OnConstruction(const FTransform& Transform)
 void ABaseWeapon::BeginPlay()
 {
     Super::BeginPlay();
-
-    // 게임 시작 시 최신 데이터 로드 및 적용
     LoadWeaponData();
 }
 
@@ -62,34 +58,23 @@ void ABaseWeapon::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
     Super::EndPlay(EndPlayReason);
 
-    // [크래시 방지] 레벨 이동/종료 시 물리 엔진이 참조하지 못하도록 강제 비활성화
     if (WeaponMesh)
     {
         WeaponMesh->SetSimulatePhysics(false);
         WeaponMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-        // 필요한 경우 충돌 응답도 모두 무시로 설정
         WeaponMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
     }
 }
 
-// [핵심] 데이터 테이블에서 정보를 읽어와 적용하는 로직
 void ABaseWeapon::LoadWeaponData()
 {
     DurabilityReduction = GlobalDurabilityReduction;
 
-    // 1. GameInstance 가져오기
     UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
-    if (!GI)
-    {
-        // 에디터의 컨스트럭션 스크립트 등 런타임 게임 인스턴스가 없는 경우 처리
-        return;
-    }
+    if (!GI) return;
 
-    // 2. GameInstance에서 무기 데이터 테이블 찾기
-    // ※ 주의: BRGameInstance의 ConfigDataMap에 등록한 Key 이름과 일치해야 합니다.
-    // 보통 "WeaponBalance" 또는 "WeaponData" 등으로 저장하셨을 겁니다.
     UDataTable* WeaponTable = nullptr;
-    FString TableKey = TEXT("WeaponData"); // 실제 키 값으로 변경하세요!
+    FString TableKey = TEXT("WeaponData");
 
     if (GI->ConfigDataMap.Contains(TableKey))
     {
@@ -98,26 +83,19 @@ void ABaseWeapon::LoadWeaponData()
 
     if (!WeaponTable)
     {
-        // 테이블을 못 찾았으면 경고 (아직 로드 안 됐거나 키가 틀림)
         LOG_WEAPON(Warning, "WeaponDataTable Not Found in GameInstance with Key: %s", *TableKey);
         return;
     }
 
-    // 3. RowName 유효성 체크
     if (WeaponRowName.IsNone()) return;
 
     static const FString ContextString(TEXT("Weapon Data Context"));
-
-    // 4. 테이블에서 데이터 조회
     FWeaponData* FoundData = WeaponTable->FindRow<FWeaponData>(WeaponRowName, ContextString);
 
     if (FoundData)
     {
         CurrentWeaponData = *FoundData;
-
-        // 5. 스탯 적용
         InitializeWeaponStats(CurrentWeaponData);
-
         LOG_WEAPON(Display, "Loaded Weapon Data for [%s] from GameInstance", *WeaponRowName.ToString());
     }
     else
@@ -128,24 +106,17 @@ void ABaseWeapon::LoadWeaponData()
 
 void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
 {
-    LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Mass: %f",
-        *WeaponRowName.ToString(), NewStats.MassKg);
+    LOG_WEAPON(Display, "Weapon Stats Updated -> Name: %s, Mass: %f", *WeaponRowName.ToString(), NewStats.MassKg);
 
-    // 화면에 즉시 표시 (디버깅용)
     if (GEngine)
     {
-        FString DebugMsg = FString::Printf(TEXT("Weapon: %s | Mass: %.1f"),
-            *WeaponRowName.ToString(), NewStats.MassKg);
+        FString DebugMsg = FString::Printf(TEXT("Weapon: %s | Mass: %.1f"), *WeaponRowName.ToString(), NewStats.MassKg);
         GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Cyan, DebugMsg);
     }
 
-    // NewStats는 이제 데이터 테이블에서 가져온 행 데이터임
     if (WeaponMesh && NewStats.WeaponMesh)
     {
-        // 1. 메시 할당
         WeaponMesh->SetStaticMesh(NewStats.WeaponMesh);
-
-        // 2. 물리 질량 설정 (데이터 테이블의 MassKg 반영)
         if (NewStats.MassKg > 0.0f)
         {
             WeaponMesh->SetMassOverrideInKg(NAME_None, NewStats.MassKg, true);
@@ -153,17 +124,14 @@ void ABaseWeapon::InitializeWeaponStats(const FWeaponData& NewStats)
     }
 }
 
-// 상호작용 실행 시 호출
 void ABaseWeapon::Interact(ABaseCharacter* Character)
 {
     if (Character)
     {
-        // 캐릭터의 장착 함수 호출
         Character->EquipWeapon(this);
     }
 }
 
-// UI에 표시될 문구
 FText ABaseWeapon::GetInteractionPrompt()
 {
     return FText::Format(NSLOCTEXT("Interaction", "EquipWeapon", "장착: {0}"), FText::FromString(GetName()));
@@ -171,7 +139,6 @@ FText ABaseWeapon::GetInteractionPrompt()
 
 void ABaseWeapon::OnEquipped()
 {
-    // 장착 시 물리 끄기 및 충돌 설정 변경
     if (WeaponMesh)
     {
         WeaponMesh->SetSimulatePhysics(false);
@@ -185,42 +152,30 @@ void ABaseWeapon::OnDropped()
 {
     if (WeaponMesh)
     {
-        // 1. 장착 해제 플래그를 가장 먼저 설정하여 공격 컴포넌트의 접근을 차단
         bIsEquipped = false;
 
         FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
         DetachFromActor(DetachRules);
 
-        // 2. 물리 및 충돌 강제 초기화
         WeaponMesh->SetSimulatePhysics(true);
         WeaponMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
-
-        // 3. 상호작용 채널(Visibility)을 포함한 모든 채널 응답 복구
         WeaponMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
         WeaponMesh->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
         WeaponMesh->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
         WeaponMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-
-        // 4. 남아있을지 모르는 델리게이트 정리
         WeaponMesh->OnComponentHit.Clear();
 
         LOG_WEAPON(Display, "Weapon [%s] dropped: Server-side collision reset complete.", *GetName());
     }
 }
 
-// 내구도 감소 로직 구현
 void ABaseWeapon::DecreaseDurability(float DamageAmount)
 {
     if (CurrentWeaponData.Durability <= 0.0f) return;
 
-    // Version 2: 데미지 비례 (주석)
-    // float DurabilityToReduce = DamageAmount * 0.1f;
-
     CurrentWeaponData.Durability = FMath::Clamp(CurrentWeaponData.Durability - DurabilityReduction, 0.0f, CurrentWeaponData.Durability);
-
     LOG_WEAPON(Display, "Durability: %.1f / %.1f", CurrentWeaponData.Durability, 100.f);
 
-    // [추가됨] 내구도 0 도달 시 파괴 로직 실행
     if (CurrentWeaponData.Durability <= 0.0f)
     {
         BreakWeapon();
@@ -229,11 +184,9 @@ void ABaseWeapon::DecreaseDurability(float DamageAmount)
 
 void ABaseWeapon::BreakWeapon()
 {
-    // [2025-11-18] 커스텀 디버그 로그 매크로 사용
     LOG_WEAPON(Warning, "Weapon [%s] has been BROKEN!", *WeaponRowName.ToString());
 
-    // 1. 시각적 처리: 원본 메시를 즉시 숨기고 충돌을 제거
-    // Destroy()는 프레임 끝에 수행되므로 시각적으로 즉시 사라지게 해야 겹쳐 보이지 않습니다.
+    // 1. 시각적 처리 숨기기
     if (WeaponMesh)
     {
         WeaponMesh->SetVisibility(false);
@@ -241,56 +194,85 @@ void ABaseWeapon::BreakWeapon()
         WeaponMesh->SetSimulatePhysics(false);
     }
 
-    // 2. 소유자 참조 해제
+    // 2. 소유자 해제
     ABaseCharacter* OwnerCharacter = Cast<ABaseCharacter>(GetOwner());
     if (OwnerCharacter)
     {
         OwnerCharacter->HandleWeaponBroken();
     }
 
-    //// 3. 장착 해제 및 물리적 분리
-    //FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
-    //DetachFromActor(DetachRules);
-    //bIsEquipped = false;
+    // 3. Transform 저장 및 장착 해제
+    FTransform SpawnTransform = GetActorTransform();
+    FDetachmentTransformRules DetachRules(EDetachmentRule::KeepWorld, true);
+    DetachFromActor(DetachRules);
+    bIsEquipped = false;
 
-    //// 4. Chaos Destruction 실행
-    //if (CurrentWeaponData.FracturedMesh)
-    //{
-    //    FTransform SpawnTransform = GetActorTransform();
-    //    FActorSpawnParameters SpawnParams;
-    //    SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+    // 4. [수정됨] 권한이 있는 서버에서만 멀티캐스트를 호출하여 클라이언트들에게 파편 스폰 명령을 내림
+    if (HasAuthority())
+    {
+        Multicast_BreakWeaponVisual(SpawnTransform);
 
-    //    AGeometryCollectionActor* FracturedActor = GetWorld()->SpawnActor<AGeometryCollectionActor>(
-    //        AGeometryCollectionActor::StaticClass(),
-    //        SpawnTransform,
-    //        SpawnParams
-    //    );
+        // 멀티캐스트 RPC가 클라이언트들에게 도달할 시간을 주기 위해 즉시 파괴하지 않고 수명 단축
+        SetLifeSpan(0.2f);
+    }
+}
 
-    //    if (FracturedActor)
-    //    {
-    //        UGeometryCollectionComponent* GCComp = FracturedActor->GetGeometryCollectionComponent();
-    //        if (GCComp)
-    //        {
-    //            // 데이터 테이블에서 가져온 파괴 에셋 설정
-    //            GCComp->SetRestCollection(CurrentWeaponData.FracturedMesh);
+// [추가됨] 서버와 모든 클라이언트에서 개별적으로 실행되는 멀티캐스트 구현부
+void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& SpawnTransform)
+{
+    if (CurrentWeaponData.FracturedMesh)
+    {
+        AGeometryCollectionActor* FracturedActor = GetWorld()->SpawnActorDeferred<AGeometryCollectionActor>(
+            AGeometryCollectionActor::StaticClass(),
+            SpawnTransform
+        );
 
-    //            // [수정] 물리 시뮬레이션 활성화 및 히트 이벤트 설정
-    //            GCComp->SetSimulatePhysics(true);
-    //            GCComp->SetNotifyRigidBodyCollision(true);
+        if (FracturedActor)
+        {
+            // 각 클라이언트에서 로컬로 연산할 것이므로 서버의 파편 물리 상태를 리플리케이트 받지 않음 (네트워크 부하 극저하)
+            FracturedActor->SetReplicates(false);
 
-    //            // [추가] 조각들이 사방으로 흩어지도록 초기 충격을 가함
-    //            // 단순히 스폰만 하면 형태를 유지한 채 떨어질 수 있으므로 임펄스를 추가합니다.
-    //            GCComp->AddImpulse(FVector(0.f, 0.f, 50.f)); // 위쪽으로 살짝 튀게 함
-    //        }
-    //        FracturedActor->SetLifeSpan(10.0f);
-    //    }
-    //}
-    //else
-    //{
-    //    LOG_WEAPON(Error, "No FracturedMesh defined in DataTable for [%s]!", *WeaponRowName.ToString());
-    //    Destroy();
-    //}
+            UGeometryCollectionComponent* GCComp = FracturedActor->GetGeometryCollectionComponent();
+            if (GCComp)
+            {
+                GCComp->SetRestCollection(CurrentWeaponData.FracturedMesh);
 
-    // 5. 원본 액터 제거
-    Destroy();
+                // 1. 파괴가 100% 보장되는 기본 물리 프로파일 사용
+                GCComp->SetCollisionProfileName(TEXT("PhysicsActor"));
+
+                // 2. 그 위에 덮어쓰기: 파편이 플레이어의 길을 막거나 튕겨내지 않도록 무시
+                GCComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+                GCComp->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
+
+                GCComp->SetSimulatePhysics(true);
+                GCComp->SetNotifyRigidBodyCollision(true);
+
+                GCComp->RecreatePhysicsState();
+            }
+
+            UGameplayStatics::FinishSpawningActor(FracturedActor, SpawnTransform);
+
+            if (GCComp)
+            {
+                // 타겟 액터에만 점 데미지를 주어 제자리에서 즉시 분리
+                FHitResult HitInfo;
+                HitInfo.ImpactPoint = SpawnTransform.GetLocation();
+
+                UGameplayStatics::ApplyPointDamage(
+                    FracturedActor,
+                    1000000.f,
+                    FVector::DownVector,
+                    HitInfo,
+                    nullptr,
+                    this,
+                    nullptr
+                );
+
+                // 아주 살짝 흩어지도록 임펄스 추가
+                FVector CrumbleImpulse = FMath::VRand() * 10.0f;
+                GCComp->AddImpulse(CrumbleImpulse, NAME_None, true);
+            }
+            FracturedActor->SetLifeSpan(10.0f);
+        }
+    }
 }

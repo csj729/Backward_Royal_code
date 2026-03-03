@@ -94,10 +94,30 @@ void ABRGameMode::BeginPlay()
 	Super::BeginPlay();
 
 	// GameState에 최소/최대 플레이어 수 설정
-	if (ABRGameState* BRGameState = GetGameState<ABRGameState>())
+	ABRGameState* BRGameState = GetGameState<ABRGameState>();
+	if (BRGameState)
 	{
 		BRGameState->MinPlayers = MinPlayers;
 		BRGameState->MaxPlayers = MaxPlayers;
+	}
+
+	// 맵을 로비 없이 바로 실행한 경우(테스트): 로딩 창을 표시하지 않도록 플래그 설정 (블루프린트 로딩 위젯에서 bSkipLoadingScreen 확인)
+	if (BRGameState && GetWorld())
+	{
+		UBRGameInstance* GI = Cast<UBRGameInstance>(GetGameInstance());
+		FString CurrentMapName = UGameplayStatics::GetCurrentLevelName(GetWorld(), true);
+		if (CurrentMapName.IsEmpty())
+		{
+			CurrentMapName = GetWorld()->GetMapName();
+			CurrentMapName.RemoveFromStart(GetWorld()->StreamingLevelsPrefix);
+		}
+		FString LobbyMapBase = LobbyMapPath.IsEmpty() ? TEXT("Main_Scene") : FPaths::GetBaseFilename(LobbyMapPath);
+		const bool bIsLobbyMap = CurrentMapName.Equals(LobbyMapBase, ESearchCase::IgnoreCase);
+		if (!bIsLobbyMap && GI && !GI->GetPendingApplyRandomTeamRoles())
+		{
+			BRGameState->bSkipLoadingScreen = true;
+			UE_LOG(LogTemp, Log, TEXT("[맵 직접 실행] 로딩 창 비표시 (bSkipLoadingScreen=true)"));
+		}
 	}
 
 	// 로비에서 랜덤 팀 배정 후 예약된 경우: 게임 맵 로드 후 플레이어 스폰이 끝날 때까지 지연 후 적용

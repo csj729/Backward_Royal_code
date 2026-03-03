@@ -67,6 +67,10 @@ public:
 	UPROPERTY(ReplicatedUsing = OnRep_AllClientsSpawnReady, BlueprintReadOnly, Category = "Game")
 	bool bAllClientsSpawnReady = false;
 
+	/** [서버 설정 → 복제] true면 로딩 창을 표시하지 않음. 맵을 로비 없이 바로 실행(테스트)할 때 사용. 블루프린트 로딩 위젯에서 이 값이 true면 AddToViewport 하지 않거나 즉시 제거. */
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "Game")
+	bool bSkipLoadingScreen = false;
+
 	// 플레이어 목록 변경 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "Events")
 	FOnPlayerListChanged OnPlayerListChanged;

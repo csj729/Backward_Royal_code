@@ -32,6 +32,7 @@ void ABRGameState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 	DOREPLIFETIME(ABRGameState, WinningTeamNumber);
 	DOREPLIFETIME(ABRGameState, bBodyAssignmentComplete);
 	DOREPLIFETIME(ABRGameState, bAllClientsSpawnReady);
+	DOREPLIFETIME(ABRGameState, bSkipLoadingScreen);
 }
 
 void ABRGameState::BeginPlay()

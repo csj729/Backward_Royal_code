@@ -418,8 +418,11 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 	{
 		if (aPawn->IsA<AUpperBodyPawn>())
 			ApplyUpperBodyViewAndInput();
-		else if (aPawn->IsA<APlayerCharacter>())
-			SetupRoleInput(true, aPawn); // 하체: 이동 키 매핑(LowerBodyContext) 등록, 폰 전달로 폴백 확실히 동작
+		else
+		{
+			SetupRoleInput(true, aPawn); // 하체: 이동 키 매핑 등록
+			SetIgnoreMoveInput(true);    // 로딩 UI 동안 키보드 인식 안 되게
+		}
 	}
 
 	// 리슨 서버: 호스트는 클라이언트 쪽 AcknowledgePossession이 호출되지 않을 수 있음 → 서버에서 직접 스폰 완료 집계
@@ -431,20 +434,20 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 		}
 	}
 
-	// [로딩 중 키보드 비인식 기능 주석 처리] 서버: 전원 스폰 완료 시 호스트 이동 입력 해제용 바인딩
-	// if (HasAuthority() && IsLocalController() && aPawn && (aPawn->IsA<APlayerCharacter>() || aPawn->IsA<AUpperBodyPawn>()))
-	// {
-	// 	if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
-	// 	{
-	// 		if (!bSpawnReadyDelegateBound)
-	// 		{
-	// 			GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
-	// 			bSpawnReadyDelegateBound = true;
-	// 		}
-	// 		if (GS->bAllClientsSpawnReady)
-	// 			OnAllClientsSpawnReadyCallback();
-	// 	}
-	// }
+	// 로딩 UI 동안 키보드 비인식: 전원 스폰 완료 시에만 이동 입력 해제
+	if (HasAuthority() && IsLocalController() && aPawn && (aPawn->IsA<APlayerCharacter>() || aPawn->IsA<AUpperBodyPawn>()))
+	{
+		if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+		{
+			if (!bSpawnReadyDelegateBound)
+			{
+				GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+				bSpawnReadyDelegateBound = true;
+			}
+			if (GS->bAllClientsSpawnReady)
+				OnAllClientsSpawnReadyCallback();
+		}
+	}
 
 	if (OnPawnChanged.IsBound())
 	{
@@ -454,19 +457,19 @@ void ABRPlayerController::OnPossess(APawn* aPawn)
 
 void ABRPlayerController::OnAllClientsSpawnReadyCallback()
 {
-	// [로딩 중 키보드 비인식 기능 주석 처리] 스폰 완료 시 입력 모드 전환·이동 입력 해제
-	// if (!IsLocalController()) return;
-	// UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] 콜백 실행 (로컬 플레이어, 서버=%d)"), HasAuthority() ? 1 : 0);
-	// FInputModeGameOnly GameInputMode;
-	// SetInputMode(GameInputMode);
-	// bShowMouseCursor = false;
-	// APawn* P = GetPawn();
-	// if (P && P->IsA<APlayerCharacter>())
-	// {
-	// 	ResetIgnoreMoveInput();
-	// 	SetIgnoreMoveInput(false);
-	// 	UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 이동 입력 해제 (하체 로컬 플레이어)"));
-	// }
+	if (!IsLocalController()) return;
+	UE_LOG(LogTemp, Log, TEXT("[OnAllClientsSpawnReady] 콜백 실행 (로컬 플레이어, 서버=%d)"), HasAuthority() ? 1 : 0);
+	FInputModeGameOnly GameInputMode;
+	SetInputMode(GameInputMode);
+	bShowMouseCursor = false;
+	APawn* P = GetPawn();
+	// 하체 폰일 때만 로딩 완료 후 이동 입력 허용 (상체는 ApplyUpperBodyViewAndInput에서 이미 처리)
+	if (P && !P->IsA<AUpperBodyPawn>())
+	{
+		ResetIgnoreMoveInput();
+		SetIgnoreMoveInput(false);
+		UE_LOG(LogTemp, Log, TEXT("[스폰 완료] 이동 입력 해제 (하체 로컬 플레이어)"));
+	}
 }
 
 void ABRPlayerController::AcknowledgePossession(APawn* P)
@@ -481,24 +484,27 @@ void ABRPlayerController::AcknowledgePossession(APawn* P)
 		ServerReportSpawnReady();
 	}
 
-	// 클라이언트: 상체(UpperBodyPawn)가 아니면 하체로 간주하고 이동 키 매핑 등록. BP_LowerBodyCharacter 등 APlayerCharacter가 아닌 하체 폰도 포함
+	// 클라이언트: 상체가 아니면 하체로 간주하고 이동 키 매핑 등록. 로딩 UI 동안 키보드 비인식
 	if (!HasAuthority() && IsLocalController() && P && !P->IsA<AUpperBodyPawn>())
+	{
 		SetupRoleInput(true, P);
+		SetIgnoreMoveInput(true);
+	}
 
-	// [로딩 중 키보드 비인식 기능 주석 처리] 클라이언트: 전원 스폰 완료 시 이동 입력 해제용 델리게이트 바인딩
-	// if (!HasAuthority() && IsLocalController())
-	// {
-	// 	if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
-	// 	{
-	// 		if (!bSpawnReadyDelegateBound)
-	// 		{
-	// 			GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
-	// 			bSpawnReadyDelegateBound = true;
-	// 		}
-	// 		if (GS->bAllClientsSpawnReady)
-	// 			OnAllClientsSpawnReadyCallback();
-	// 	}
-	// }
+	// 로딩 완료 시 이동 입력 해제용 델리게이트 바인딩
+	if (!HasAuthority() && IsLocalController())
+	{
+		if (ABRGameState* GS = GetWorld() ? GetWorld()->GetGameState<ABRGameState>() : nullptr)
+		{
+			if (!bSpawnReadyDelegateBound)
+			{
+				GS->OnAllClientsSpawnReady.AddDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+				bSpawnReadyDelegateBound = true;
+			}
+			if (GS->bAllClientsSpawnReady)
+				OnAllClientsSpawnReadyCallback();
+		}
+	}
 }
 
 void ABRPlayerController::ServerReportSpawnReady_Implementation()
@@ -634,13 +640,12 @@ void ABRPlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 				GameSession->OnCreateSessionComplete.RemoveAll(this);
 			}
 		}
-		// [로딩 중 키보드 비인식 기능 주석 처리] 스폰 완료 델리게이트 바인딩 해제
-		// if (bSpawnReadyDelegateBound)
-		// {
-		// 	if (ABRGameState* GS = World->GetGameState<ABRGameState>())
-		// 		GS->OnAllClientsSpawnReady.RemoveDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
-		// 	bSpawnReadyDelegateBound = false;
-		// }
+		if (bSpawnReadyDelegateBound)
+		{
+			if (ABRGameState* GS = World->GetGameState<ABRGameState>())
+				GS->OnAllClientsSpawnReady.RemoveDynamic(this, &ABRPlayerController::OnAllClientsSpawnReadyCallback);
+			bSpawnReadyDelegateBound = false;
+		}
 	}
 	
 	Super::EndPlay(EndPlayReason);
@@ -753,6 +758,8 @@ void ABRPlayerController::SetupSpectatorInput()
 {
 	// 관전 모드는 하체(이동) 컨텍스트를 재사용하여 이동을 가능하게 함
 	SetupRoleInput(true);
+	ResetIgnoreMoveInput();
+	SetIgnoreMoveInput(false);
 }
 
 void ABRPlayerController::ClientHandleSpectatorUI_Implementation()
@@ -1981,11 +1988,10 @@ void ABRPlayerController::SetupRoleInput(bool bIsLower, APawn* OptionalPawnForFa
         UE_LOG(LogTemp, Log, TEXT("[SetupRoleInput] 매핑 컨텍스트 적용 완료 bIsLower=%d Context=%s"), bIsLower ? 1 : 0, *TargetContext->GetName());
     }
 
-    // 하체일 때 이동/시선 입력 무시 해제 (상체 전환 시 SetIgnoreMoveInput(true) 되므로, 하체로 돌아올 때 명시적으로 해제 필요)
+    // 하체: 시선/입력모드만 설정. 이동 입력은 여기서 켜지 않음 (OnRep_PlayerState 등이 나중에 SetupRoleInput을 다시 불러 로딩 중 입력이 켜지는 것 방지).
+    // 이동 해제는 OnAllClientsSpawnReady 콜백 또는 SetupSpectatorInput(관전) / BRPlayerState 역할 교체 시에만 수행.
     if (bIsLower && IsLocalController())
     {
-        ResetIgnoreMoveInput();
-        SetIgnoreMoveInput(false);
         ResetIgnoreLookInput();
         SetIgnoreLookInput(false);
         FInputModeGameOnly GameInputMode;
