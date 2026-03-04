@@ -49,9 +49,8 @@ public:
     // 파괴 로직 함수
     void BreakWeapon();
 
-    // [추가됨] 모든 클라이언트에서 파괴 연출을 재생하기 위한 멀티캐스트 함수
     UFUNCTION(NetMulticast, Reliable)
-    void Multicast_BreakWeaponVisual(const FTransform& SpawnTransform);
+    void Multicast_BreakWeaponVisual(const FTransform& SpawnTransform, class UGeometryCollection* InFracturedMesh);
 
     // DamageAmount: 공격 시 가한 데미지 (버전 2에서 사용)
     UFUNCTION(BlueprintCallable, Category = "Weapon|Durability")

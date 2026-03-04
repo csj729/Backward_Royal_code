@@ -210,17 +210,20 @@ void ABaseWeapon::BreakWeapon()
     // 4. [수정됨] 권한이 있는 서버에서만 멀티캐스트를 호출하여 클라이언트들에게 파편 스폰 명령을 내림
     if (HasAuthority())
     {
-        Multicast_BreakWeaponVisual(SpawnTransform);
+        // 서버의 CurrentWeaponData.FracturedMesh를 직접 인자로 넘겨 클라이언트 Null 참조를 방지
+        Multicast_BreakWeaponVisual(SpawnTransform, CurrentWeaponData.FracturedMesh);
 
-        // 멀티캐스트 RPC가 클라이언트들에게 도달할 시간을 주기 위해 즉시 파괴하지 않고 수명 단축
-        SetLifeSpan(0.2f);
+        // 멀티캐스트 RPC가 클라이언트들에게 도달할 시간을 주기 위해 지연 시간 연장 (0.2 -> 0.5)
+        SetLifeSpan(0.5f);
     }
 }
 
-// [추가됨] 서버와 모든 클라이언트에서 개별적으로 실행되는 멀티캐스트 구현부
-void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& SpawnTransform)
+// [수정됨] 매개변수로 서버에서 넘겨준 InFracturedMesh를 사용하도록 변경
+void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& SpawnTransform, UGeometryCollection* InFracturedMesh)
 {
-    if (CurrentWeaponData.FracturedMesh)
+    LOG_WEAPON(Display, "Multicast_BreakWeaponVisual Called. Mesh Valid: %s", InFracturedMesh ? TEXT("True") : TEXT("False"));
+
+    if (InFracturedMesh)
     {
         FActorSpawnParameters SpawnParams;
         SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -238,7 +241,8 @@ void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& S
             UGeometryCollectionComponent* GCComp = FracturedActor->GetGeometryCollectionComponent();
             if (GCComp)
             {
-                GCComp->SetRestCollection(CurrentWeaponData.FracturedMesh);
+                // 클라이언트 환경에서도 서버가 넘겨준 포인터를 통해 정상적으로 설정됨
+                GCComp->SetRestCollection(InFracturedMesh);
 
                 // 1. 파괴가 100% 보장되는 기본 물리 프로파일 사용
                 GCComp->SetCollisionProfileName(TEXT("PhysicsActor"));
@@ -249,14 +253,16 @@ void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& S
 
                 GCComp->SetSimulatePhysics(true);
                 GCComp->SetNotifyRigidBodyCollision(true);
-
-                GCComp->RecreatePhysicsState();
             }
 
+            // FinishSpawningActor를 호출하여 액터 초기화 완료
             UGameplayStatics::FinishSpawningActor(FracturedActor, SpawnTransform);
 
             if (GCComp)
             {
+                // 스폰이 완료된 이후에 물리 상태를 안전하게 재생성
+                GCComp->RecreatePhysicsState();
+
                 // 타겟 액터에만 점 데미지를 주어 제자리에서 즉시 분리
                 FHitResult HitInfo;
                 HitInfo.ImpactPoint = SpawnTransform.GetLocation();
@@ -277,5 +283,9 @@ void ABaseWeapon::Multicast_BreakWeaponVisual_Implementation(const FTransform& S
             }
             FracturedActor->SetLifeSpan(10.0f);
         }
+    }
+    else
+    {
+        LOG_WEAPON(Warning, "InFracturedMesh is NULL! Multicast failed to spawn GC on this client.");
     }
 }
