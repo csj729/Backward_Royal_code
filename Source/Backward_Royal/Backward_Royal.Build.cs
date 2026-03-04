@@ -37,5 +37,11 @@ public class Backward_Royal : ModuleRules
 		{
 			PrivateDependencyModuleNames.Add("UnrealEd");
 		}
-	}
+
+        // 패키징 시 프로젝트 루트의 Data 폴더(JSON 설정 파일들)를 빌드 출력에 포함
+        // NonUFS: .pak 파일 안이 아니라 별도 파일로 복사 (FFileHelper로 읽기 위해)
+        // $(ProjectDir) = 프로젝트 루트 (.uproject 위치), ... = 재귀적 모든 파일
+        RuntimeDependencies.Add("$(ProjectDir)/Data/...", StagedFileType.NonUFS);
+        RuntimeDependencies.Add("$(ProjectDir)/BR_DataTool.exe", StagedFileType.NonUFS);
+    }
 }

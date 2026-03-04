@@ -58,7 +58,7 @@ void UBRGameInstance::Init() {
   // S_UserInfo 에셋에서 PlayerName 로드
   LoadPlayerNameFromUserInfo();
   // 로컬 슬롯에 저장된 설정이 있으면 복원 (데이터 보존)
-  LoadPlayerSettingsFromSlot();
+  // LoadPlayerSettingsFromSlot();
 
   // PIE 월드 클린업이 엔진의 '월드 참조 검사'보다 먼저 일어나게 등록.
   // Shutdown에서 Remove.
@@ -816,19 +816,16 @@ void UBRGameInstance::LoadConfigFromJson(const FString &FileName,
 }
 
 FString UBRGameInstance::GetConfigDirectory() {
-  FString TargetPath;
+    // FPaths::ProjectDir()는 에디터에서는 .uproject가 있는 프로젝트 루트,
+    // 패키징 빌드에서는 exe의 상위 디렉토리를 반환하므로 두 환경 모두에서 사용 가능.
+    FString TargetPath = FPaths::ProjectDir() / TEXT("Data/");
 
-#if WITH_EDITOR
-  // 1. 에디터 환경: 프로젝트 루트의 Data 폴더
-  TargetPath = FPaths::ProjectDir() / TEXT("Data/");
-#else
-  // 2. 패키징 환경: 빌드된 .exe 옆의 Data 폴더 (예:
-  // Build/Windows/MyProject/Data/) FPaths::ProjectDir()는 패키징 후에도 실행
-  // 파일 기준 경로를 반환합니다.
-  TargetPath = FPaths::ProjectDir() / TEXT("Data/");
-#endif
+    // 디버깅: 실제 경로와 폴더 존재 여부 로그
+    GI_LOG(Log, TEXT("Config Directory: %s (Exists: %s)"), *TargetPath,
+        FPlatformFileManager::Get().GetPlatformFile().DirectoryExists(*TargetPath)
+        ? TEXT("Yes") : TEXT("No"));
 
-  return TargetPath;
+    return TargetPath;
 }
 
 /** JSON 문자열을 DataTable에 주입 */
@@ -1168,7 +1165,7 @@ void UBRGameInstance::SavePlayerSettingsToSlot()
       UGameplayStatics::CreateSaveGameObject(UBRPlayerSettingsSaveGame::StaticClass()));
   if (!Save) return;
   Save->SavedPlayerName = PlayerName;
-  Save->SavedCustomization = LocalCustomizationData;
+  // Save->SavedCustomization = LocalCustomizationData;
   Save->SavedUserUID = UserUID;
   if (UGameplayStatics::SaveGameToSlot(Save, PlayerSettingsSlotName, PlayerSettingsUserIndex))
   {
@@ -1190,10 +1187,10 @@ void UBRGameInstance::LoadPlayerSettingsFromSlot()
     PlayerName = Loaded->SavedPlayerName;
     UE_LOG(LogBRGameInstance, Log, TEXT("플레이어 설정 로드: 이름='%s'"), *PlayerName);
   }
-  if (Loaded->SavedCustomization.bIsDataValid)
-  {
-    LocalCustomizationData = Loaded->SavedCustomization;
-  }
+  //if (Loaded->SavedCustomization.bIsDataValid)
+  //{
+  //  LocalCustomizationData = Loaded->SavedCustomization;
+  //}
   if (!Loaded->SavedUserUID.IsEmpty())
   {
     UserUID = Loaded->SavedUserUID;
