@@ -184,7 +184,6 @@ void UBRAttackComponent::MulticastPlayHitSound_Implementation(USoundBase* SoundT
     }
 }
 
-
 void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponent* OtherComp, const FVector& NormalImpulse, const FHitResult& Hit)
 {
     ABaseCharacter* OwnerChar = Cast<ABaseCharacter>(GetOwner());
@@ -241,10 +240,30 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
     {
         UGameplayStatics::ApplyDamage(OtherActor, CalculatedDamage, GetOwner()->GetInstigatorController(), GetOwner(), nullptr);
 
-        if (MyWeapon)
+        // =======================================================
+        // [수정] 무기 내구도 감소 및 "피격 사운드 재생"
+        // =======================================================
+        if (Cast<ABaseCharacter>(OtherActor))
         {
             MyWeapon->DecreaseDurability(CalculatedDamage);
+
+            // 무기로 때렸을 때 소리 재생
+            if (MyWeapon->CurrentWeaponData.HitSound)
+            {
+                // [핵심] 3번째 인자로 1.0f (볼륨) 추가!
+                MulticastPlayHitSound(MyWeapon->CurrentWeaponData.HitSound, Hit.ImpactPoint, 1.0f);
+            }
         }
+        else
+        {
+            // 맨손으로 때렸을 때 소리 재생
+            if (OwnerChar && OwnerChar->PunchHitSound)
+            {
+                // [핵심] 3번째 인자로 1.0f (볼륨) 추가!
+                MulticastPlayHitSound(OwnerChar->PunchHitSound, Hit.ImpactPoint, 1.0f);
+            }
+        }
+        // =======================================================
     }
 
     // 공격 성공 시 히트 스탑 적용 (0.1초 멈춤 -> 이후 애니메이션 종료)

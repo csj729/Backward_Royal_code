@@ -11,6 +11,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogBaseChar, Log, All);
 
 class ABaseWeapon;
 class UBRAttackComponent;
+class UAnimMontage;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnHPChanged, float, CurrentHP, float, MaxHP);
 
@@ -99,7 +100,9 @@ public:
     bool bNextAttackIsLeft = false;
 
     void RequestAttack();
-    void HandleWeaponBroken();
+    
+    UFUNCTION(NetMulticast, Reliable)
+    void MulticastHandleWeaponBroken();
 
     UFUNCTION(NetMulticast, Reliable)
     void MulticastPlayWeaponAttack(UAnimMontage* MontageToPlay, APawn* RequestingPawn);
@@ -170,12 +173,12 @@ public:
     UFUNCTION(BlueprintImplementableEvent, Category = "Status|Stun")
     void OnRecoverFromStun();
     
-    // [신규] 주먹 휘두르는 소리 (붕~)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    // 맨손 휘두르는 소리
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Sound")
     USoundBase* PunchSwingSound;
 
-    // [신규] 주먹에 맞았을 때 소리 (퍽!)
-    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    // 맨손으로 때렸을 때 소리
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Combat|Sound")
     USoundBase* PunchHitSound;
     
     // 주먹 소리 크기 조절

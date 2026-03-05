@@ -284,7 +284,6 @@ void ABRPlayerState::SwapControlWithPartner()
 		MyPC->ClientRestart(PartnerOldPawn);
 		PartnerPC->ClientRestart(MyOldPawn);
 
-		// 6. 설정 적용 람다 실행
 		auto ApplyRoleSettings = [this](ABRPlayerController* PC, bool bIsLower)
 			{
 				if (!PC) return;

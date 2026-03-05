@@ -1253,10 +1253,15 @@ void ABRGameMode::CheckMatchWinner()
 
 	// 생존 팀(TeamNumber) 수집
 	TSet<int32> AliveTeams;
+	UE_LOG(LogTemp, Warning, TEXT("[CheckMatchWinner] 현재 플레이어 상태 점검 시작"));
 	for (APlayerState* PS : BRGameState->PlayerArray)
 	{
 		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
 		{
+			//  팀 번호(TeamNumber)와 상태(CurrentStatus) 로그 추가
+			UE_LOG(LogTemp, Warning, TEXT(" - %s: TeamNumber = %d, Status = %d"),
+				*BRPS->GetPlayerName(), BRPS->TeamNumber, (int32)BRPS->CurrentStatus);
+			
 			// 팀 번호가 있고(>0), 살아있는 경우
 			if (BRPS->TeamNumber > 0 && BRPS->CurrentStatus == EPlayerStatus::Alive)
 			{
@@ -1310,13 +1315,53 @@ void ABRGameMode::CheckMatchWinner()
 	}
 }
 
+void ABRGameMode::Authority_DeclareWinner(APawn* WinnerPawn)
+{
+	// 1. 중복 종료 방지 및 서버 권한 체크
+	if (bMatchEnded || !WinnerPawn || !HasAuthority()) return;
+
+	ABRGameState* BRGameState = Cast<ABRGameState>(GameState);
+	ABRPlayerState* WinnerPS = WinnerPawn->GetPlayerState<ABRPlayerState>();
+
+	if (!BRGameState || !WinnerPS) return;
+
+	// 2. 우승 데이터 추출 (팀 번호 기반)
+	int32 WinnerTeamID = WinnerPS->TeamNumber;
+	FString UpperName = "";
+	FString LowerName = "";
+	FVector WinnerLocation = WinnerPawn->GetActorLocation();
+
+	// 3. 해당 팀의 상/하체 닉네임 수집 (기존 로직 활용)
+	for (APlayerState* PS : BRGameState->PlayerArray)
+	{
+		if (ABRPlayerState* BRPS = Cast<ABRPlayerState>(PS))
+		{
+			if (BRPS->TeamNumber == WinnerTeamID)
+			{
+				if (BRPS->bIsLowerBody) LowerName = BRPS->GetPlayerName();
+				else UpperName = BRPS->GetPlayerName();
+			}
+		}
+	}
+
+	// 4. 전역 알림 (UI 표시)
+	BRGameState->MulticastMatchEnded(WinnerLocation, UpperName, LowerName);
+
+	// 5. 후속 처리 (중복 방지 및 로비 이동 타이머)
+	bMatchEnded = true;
+	GetWorld()->GetTimerManager().SetTimer(ReturnToLobbyTimerHandle, this, &ABRGameMode::ReturnToLobby, 10.0f, false);
+
+	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 승리 선언! 팀: %d, 방식: %s"), WinnerTeamID, *WinnerPawn->GetName());
+}
+
 void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[OnPlayerDied] 함수 진입"));
+
 	if (!VictimCharacter) return;
 
 	UE_LOG(LogTemp, Warning, TEXT("[GameMode] 플레이어 사망 확인: %s"), *VictimCharacter->GetName());
 
-	// 캐릭터에서 Controller 가져오기 (없으면 PlayerState에서 시도 — 하체/상체 공유 폰 등)
 	AController* Controller = VictimCharacter->GetController();
 	ABRPlayerState* PS = nullptr;
 
@@ -1326,7 +1371,6 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 	}
 	if (!PS && VictimCharacter)
 	{
-		// 폰에 붙은 PlayerState가 있다면 그 소유 컨트롤러 사용 (네트워크/공유 폰 대비)
 		PS = VictimCharacter->GetPlayerState<ABRPlayerState>();
 		if (PS)
 		{
@@ -1335,22 +1379,6 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 		}
 	}
 
-	if (PS)
-	{
-		// PlayerState에 사망 상태가 아직 반영 안 되었다면 여기서 확실히 처리
-		if (PS->CurrentStatus != EPlayerStatus::Dead)
-		{
-			PS->SetPlayerStatus(EPlayerStatus::Dead);
-		}
-		// PlayerState를 관전(PlayerIndex 0)으로 변경. bIsSpectatorSlot=true 설정 → GameState는 PS에서 읽어 반영
-		PS->SetSpectator(true);
-		UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (Team %d) 탈락 처리 완료"),
-			*PS->GetPlayerName(), PS->TeamNumber);
-	}
-
-	// -----------------------------------------------------------
-	// [수정] 팀 탈락: 파트너 찾기 (ConnectedPlayerIndex 우선 사용 + 팀 번호 백업)
-	// -----------------------------------------------------------
 	ABRGameState* GS = GetGameState<ABRGameState>();
 	if (!GS || !PS)
 	{
@@ -1358,29 +1386,28 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 		return;
 	}
 
+	// =========================================================================
+	// [핵심 수정] 피해자를 관전(Team 0)으로 만들기 전에!! 파트너를 먼저 찾습니다.
+	// =========================================================================
 	const int32 VictimPlayerIndex = GS->PlayerArray.Find(PS);
-	if (VictimPlayerIndex == INDEX_NONE)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 관전 전환 스킵: 피해자 PlayerArray 인덱스 없음"));
-		return;
-	}
+	int32 OriginalTeamNumber = PS->TeamNumber; // 원래 팀 번호 미리 저장
 
-	// 1. 먼저 '연결된 인덱스'로 파트너를 찾습니다. (가장 정확함)
 	int32 PartnerPlayerIndex = PS->ConnectedPlayerIndex;
-	ABRPlayerState* TargetPartnerPS = nullptr; // [수정] 변수명 변경 (PartnerPS -> TargetPartnerPS)
+	ABRPlayerState* TargetPartnerPS = nullptr;
 
+	// 1. 연결된 인덱스로 먼저 시도
 	if (PartnerPlayerIndex != INDEX_NONE && GS->PlayerArray.IsValidIndex(PartnerPlayerIndex))
 	{
 		TargetPartnerPS = Cast<ABRPlayerState>(GS->PlayerArray[PartnerPlayerIndex]);
 	}
 
-	// 2. 만약 인덱스로 못 찾았다면, 기존 방식(팀 번호)으로 백업 검색합니다.
-	if (!TargetPartnerPS)
+	// 2. 인덱스로 못 찾았다면 원래 팀 번호로 검색! (이게 실패했었음)
+	if (!TargetPartnerPS && OriginalTeamNumber > 0)
 	{
 		for (int32 i = 0; i < GS->PlayerArray.Num(); ++i)
 		{
 			ABRPlayerState* OtherPS = Cast<ABRPlayerState>(GS->PlayerArray[i]);
-			if (OtherPS && OtherPS != PS && OtherPS->TeamNumber == PS->TeamNumber && PS->TeamNumber > 0)
+			if (OtherPS && OtherPS != PS && OtherPS->TeamNumber == OriginalTeamNumber)
 			{
 				TargetPartnerPS = OtherPS;
 				PartnerPlayerIndex = i;
@@ -1389,49 +1416,54 @@ void ABRGameMode::OnPlayerDied(ABaseCharacter* VictimCharacter)
 		}
 	}
 
-	// 3. 찾은 파트너를 확실하게 사망 처리합니다.
+	// =========================================================================
+	// 이제 피해자와 파트너를 확실히 동시에 사망 및 관전 처리합니다.
+	// =========================================================================
+
+	// 피해자 사망 처리
+	if (PS->CurrentStatus != EPlayerStatus::Dead)
+	{
+		PS->SetPlayerStatus(EPlayerStatus::Dead);
+	}
+	PS->SetSpectator(true); // 여기서 TeamNumber가 0으로 바뀜
+	UE_LOG(LogTemp, Log, TEXT("[GameMode] %s (원래 Team %d) 탈락 처리 완료"), *PS->GetPlayerName(), OriginalTeamNumber);
+
+	// 파트너 사망 처리
 	if (TargetPartnerPS)
 	{
 		if (TargetPartnerPS->CurrentStatus != EPlayerStatus::Dead)
 		{
 			TargetPartnerPS->SetPlayerStatus(EPlayerStatus::Dead);
 		}
-		// 파트너도 PlayerState를 관전(PlayerIndex 0)으로 변경
 		TargetPartnerPS->SetSpectator(true);
 		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 파트너(%s)도 함께 사망 처리됨."), *TargetPartnerPS->GetPlayerName());
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 파트너를 찾지 못했습니다. (ConnectedIndex: %d, Team: %d)"), PS->ConnectedPlayerIndex, PS->TeamNumber);
+		UE_LOG(LogTemp, Warning, TEXT("[GameMode] 파트너를 찾지 못했습니다. (원래 Team: %d)"), OriginalTeamNumber);
 	}
 
 	// 생존 팀 확인 및 우승 처리
 	CheckMatchWinner();
 
-	// [수정] Victim과 Partner의 Controller를 각각 독립적으로 찾아서 WeakPtr로 바인딩
-	// Victim이 나가더라도 Partner는 정상적으로 관전 전환됨
-	ABRPlayerController* VictimPC = Cast<ABRPlayerController>(PS->GetOwningController());
+	// 관전 전환 타이머 처리 (기존 코드 유지)
+	ABRPlayerController* VictimPC = Cast<ABRPlayerController>(Controller);
+	ABRPlayerController* PartnerPC = TargetPartnerPS ? Cast<ABRPlayerController>(TargetPartnerPS->GetOwningController()) : nullptr;
 
-	ABRPlayerController* PartnerPC = nullptr;
-	if (GS->PlayerArray.IsValidIndex(PartnerPlayerIndex))
+	if (VictimPC || PartnerPC)
 	{
-		if (APlayerState* PartnerPS = GS->PlayerArray[PartnerPlayerIndex])
-		{
-			PartnerPC = Cast<ABRPlayerController>(PartnerPS->GetOwningController());
-		}
+		FTimerHandle SpectatorTimerHandle;
+		FTimerDelegate TimerDel;
+
+		// 인자로 PlayerIndex 2개만 넘겨주면, 함수 내부에서 GameState->PlayerArray를 통해 최신 컨트롤러를 찾음
+		TimerDel.BindLambda([this, VictimPlayerIndex, PartnerPlayerIndex]()
+			{
+				this->SwitchTeamToSpectatorByPlayerIndices(VictimPlayerIndex, PartnerPlayerIndex);
+			});
+
+		UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 탈락 — 2초 후 하체·상체 관전 전환 예약"));
+		GetWorld()->GetTimerManager().SetTimer(SpectatorTimerHandle, TimerDel, 2.0f, false);
 	}
-
-	TWeakObjectPtr<ABRPlayerController> WeakVictimPC = VictimPC;
-	TWeakObjectPtr<ABRPlayerController> WeakPartnerPC = PartnerPC;
-
-	FTimerDelegate TimerDel;
-	TimerDel.BindUObject(this, &ABRGameMode::SwitchTeamToSpectator, WeakVictimPC, WeakPartnerPC);
-	GetWorld()->GetTimerManager().SetTimer(SpecTimerHandle_DeathSpectator, TimerDel, 2.0f, false);
-
-	UE_LOG(LogTemp, Log, TEXT("[GameMode] 팀 %d 탈락 — 2초 후 하체·상체 관전 전환 예약 (Victim: %s, Partner: %s)"),
-		PS->TeamNumber,
-		VictimPC ? *VictimPC->GetName() : TEXT("None"),
-		PartnerPC ? *PartnerPC->GetName() : TEXT("None"));
 }
 
 void ABRGameMode::SwitchTeamToSpectator(TWeakObjectPtr<ABRPlayerController> VictimPC, TWeakObjectPtr<ABRPlayerController> PartnerPC)

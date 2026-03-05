@@ -148,15 +148,27 @@ public:
     
     // 발자국 소리 파일
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
-    class USoundBase* FootstepSound;
+    USoundBase* FootstepSound;
 
-    // 발자국 소리 크기 (1.0 = 기본)
+    // 발자국 소리 크기
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
     float FootstepVolume = 1.0f;
-    
-    // 발자국 소리 간격 (예: 150cm마다 소리 재생)
+
+    // [기준] 기본 걷기 보폭 (앞으로 걸을 때 기준 간격)
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
     float FootstepDistanceThreshold = 150.0f;
+
+    // [배율 1] 앞으로 달릴 때 보폭 배율 (기본 1.3)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    float ForwardSprintFootstepMultiplier = 1.3f;
+
+    // [배율 2] 뒤로 달릴 때 보폭 배율 (기본 0.5)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    float BackwardSprintFootstepMultiplier = 0.5f;
+
+    // [배율 3] 뒤로 걸을 때 보폭 배율 (기본 1.0)
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sound")
+    float BackwardWalkFootstepMultiplier = 1.0f;
 
 protected:
     UPROPERTY()

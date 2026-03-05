@@ -735,38 +735,77 @@ void APlayerCharacter::Tick(float DeltaTime)
 	ProcessFootstep(DeltaTime);
 }
 
+
+// 발소리 처리 전용 함수 구현
 void APlayerCharacter::ProcessFootstep(float DeltaTime)
 {
-	// 1. 소리 파일이 없으면 실행 안 함
-	if (!FootstepSound) return;
+    if (!FootstepSound) return;
 
-	// 2. 공중에 떠 있거나(점프 중), 수영 중이면 소리 안 남
-	if (GetCharacterMovement()->IsFalling() || GetCharacterMovement()->IsSwimming()) 
-	{
-		AccumulatedDistance = 0.0f; 
-		return;
-	}
+    // 공중이거나 수영 중이면 소리 안 남
+    if (GetCharacterMovement()->IsFalling() || GetCharacterMovement()->IsSwimming()) 
+    {
+       AccumulatedDistance = 0.0f; 
+       return;
+    }
 
-	// 3. 현재 속도(Velocity) 가져오기 (Z축 제외, 수평 이동만 계산)
-	FVector Velocity = GetVelocity();
-	Velocity.Z = 0.0f;
-	float Speed = Velocity.Size();
+    FVector Velocity = GetVelocity();
+    Velocity.Z = 0.0f;
+    float Speed = Velocity.Size();
 
-	// 4. 멈춰있으면(속도가 10 미만) 계산 중단
-	if (Speed < 10.0f) return;
+    // 캐릭터가 멈춰있으면 계산 중단
+    if (Speed < 10.0f) return;
 
-	// 5. 이동 거리 누적 (속도 * 시간 = 거리)
-	AccumulatedDistance += Speed * DeltaTime;
+    // -------------------------------------------------------------------------
+    // 🧭 방향 및 상태 판별 (상하체 분리 반전 모델 기준)
+    // -------------------------------------------------------------------------
+    float CurrentThreshold = FootstepDistanceThreshold;
 
-	// 6. 누적 거리가 설정한 간격(Threshold)을 넘었는지 확인
-	if (AccumulatedDistance >= FootstepDistanceThreshold)
-	{
-		// [수정됨] 소리 재생 (볼륨 적용)
-		// PlaySoundAtLocation(WorldContextObject, Sound, Location, VolumeMultiplier, PitchMultiplier...)
-		// 네 번째 인자에 FootstepVolume을 넣어줍니다.
-		UGameplayStatics::PlaySoundAtLocation(this, FootstepSound, GetActorLocation(), FootstepVolume);
+    FVector ForwardDir = GetActorForwardVector();
+    FVector MoveDir = Velocity.GetSafeNormal();
+    float DirectionDot = FVector::DotProduct(ForwardDir, MoveDir);
 
-		// 7. 누적 거리 초기화 (나머지 값은 남겨두어 박자 밀림 방지)
-		AccumulatedDistance -= FootstepDistanceThreshold;
-	}
+    // [핵심] 캐릭터 방향이 반대이므로 양수가 뒤로 가는 것입니다.
+    bool bIsMovingBackward = (DirectionDot > 0.1f); 
+    bool bIsMovingForward = (DirectionDot < -0.1f); 
+    
+    // 달리기 상태 확인
+    bool bIsSprinting = false;
+    if (StaminaComp)
+    {
+        bIsSprinting = StaminaComp->bIsSprinting;
+    }
+
+    // -------------------------------------------------------------------------
+    // 🏃‍♂️ 상황별 에디터 배율 적용
+    // -------------------------------------------------------------------------
+    
+    if (bIsMovingBackward && bIsSprinting)
+    {
+        // 1. 뒤로 뛸 때
+        CurrentThreshold = FootstepDistanceThreshold * BackwardSprintFootstepMultiplier; 
+    }
+    else if (bIsMovingForward && bIsSprinting)
+    {
+        // 2. 앞으로 뛸 때
+        CurrentThreshold = FootstepDistanceThreshold * ForwardSprintFootstepMultiplier; 
+    }
+    else if (bIsMovingBackward && !bIsSprinting)
+    {
+        // 3. 뒤로 걸을 때
+        CurrentThreshold = FootstepDistanceThreshold * BackwardWalkFootstepMultiplier;
+    }
+    // (앞으로 걷거나 게걸음일 때는 기본값인 FootstepDistanceThreshold 적용)
+
+    // -------------------------------------------------------------------------
+    // 🔊 소리 재생
+    // -------------------------------------------------------------------------
+    
+    AccumulatedDistance += Speed * DeltaTime;
+
+    if (AccumulatedDistance >= CurrentThreshold)
+    {
+       UGameplayStatics::PlaySoundAtLocation(this, FootstepSound, GetActorLocation(), FootstepVolume);
+       
+       AccumulatedDistance -= CurrentThreshold;
+    }
 }

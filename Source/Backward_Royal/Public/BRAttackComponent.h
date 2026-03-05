@@ -56,6 +56,7 @@ public:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastPlayHitSound(USoundBase* SoundToPlay, FVector Location, float Volume);
 
+
 private:
 	bool bIsDetectionActive = false;
 

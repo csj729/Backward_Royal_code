@@ -44,7 +44,8 @@ public:
 		TEXT("/Game/Main/Level/Stage/Stage02_Bushes"),
 		TEXT("/Game/Main/Level/Stage/Stage03_Arena"),
 		TEXT("/Game/Main/Level/Stage/Stage04_Race"),
-		TEXT("/Game/Main/Level/Stage/Stage05_Lament")
+		TEXT("/Game/Main/Level/Stage/Stage05_Lament"),
+		TEXT("/Game/Main/Level/Stage/Stage06_Hunting")
 		};
 
 	// 랜덤 맵 선택 사용 여부
@@ -111,6 +112,9 @@ public:
 	// 생존 팀 확인 후 1팀만 남으면 결산 이벤트 호출
 	UFUNCTION(Exec)
 	void CheckMatchWinner();
+
+	UFUNCTION(BlueprintCallable, Category = "GameRules")
+	void Authority_DeclareWinner(APawn* WinnerPawn);
 
 	// 매치 종료 여부 (중복 실행 방지)
 	bool bMatchEnded = false;
