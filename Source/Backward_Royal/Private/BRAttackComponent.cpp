@@ -243,15 +243,18 @@ void UBRAttackComponent::ProcessHitDamage(AActor* OtherActor, UPrimitiveComponen
         // =======================================================
         // [수정] 무기 내구도 감소 및 "피격 사운드 재생"
         // =======================================================
-        if (Cast<ABaseCharacter>(OtherActor))
+        if(MyWeapon)
         {
-            MyWeapon->DecreaseDurability(CalculatedDamage);
-
-            // 무기로 때렸을 때 소리 재생
-            if (MyWeapon->CurrentWeaponData.HitSound)
+            if (Cast<ABaseCharacter>(OtherActor))
             {
-                // [핵심] 3번째 인자로 1.0f (볼륨) 추가!
-                MulticastPlayHitSound(MyWeapon->CurrentWeaponData.HitSound, Hit.ImpactPoint, 1.0f);
+                MyWeapon->DecreaseDurability(CalculatedDamage);
+
+                // 무기로 때렸을 때 소리 재생
+                if (MyWeapon->CurrentWeaponData.HitSound)
+                {
+                    // [핵심] 3번째 인자로 1.0f (볼륨) 추가!
+                    MulticastPlayHitSound(MyWeapon->CurrentWeaponData.HitSound, Hit.ImpactPoint, 1.0f);
+                }
             }
         }
         else

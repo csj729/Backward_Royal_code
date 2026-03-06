@@ -35,8 +35,11 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FName WeaponRowName;
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Replicated, Category = "Weapon")
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_CurrentWeaponData, Category = "Weapon")
     FWeaponData CurrentWeaponData;
+
+    UFUNCTION()
+    void OnRep_CurrentWeaponData();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Weapon")
     FName GripSocketName;

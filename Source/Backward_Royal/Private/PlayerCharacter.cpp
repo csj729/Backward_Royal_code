@@ -388,6 +388,23 @@ void APlayerCharacter::PossessedBy(AController* NewController)
 		MoveComp->SetMovementMode(MOVE_Walking);
 		MoveComp->Activate();
 	}
+
+	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
+	if (MyPS)
+	{
+		// 역할 변경 시 파트너 바인딩 
+		MyPS->OnPlayerRoleChanged.AddDynamic(this, &APlayerCharacter::BindToPartnerPlayerState);
+
+		MyPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
+		MyPS->OnCustomizationDataChanged.AddDynamic(this, &APlayerCharacter::TryApplyCustomization);
+
+		if (MyPS->ConnectedPlayerIndex != -1)
+		{
+			BindToPartnerPlayerState(MyPS->bIsLowerBody);
+		}
+
+		TryApplyCustomization();
+	}
 }
 
 void APlayerCharacter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -405,6 +422,8 @@ void APlayerCharacter::OnRep_PlayerState()
 {
 	Super::OnRep_PlayerState();
 
+	LOG_PLAYER(Log, TEXT("OnRep_PlayerState() 호출됨"));
+
 	if (IsLocallyControlled())
 	{
 		if (ABRPlayerController* PC = Cast<ABRPlayerController>(GetController()))
@@ -416,17 +435,21 @@ void APlayerCharacter::OnRep_PlayerState()
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
 	if (MyPS)
 	{
-		// 파트너 바인딩은 로직 유지를 위해 연결
+		// 역할 변경 시 파트너 바인딩 
 		MyPS->OnPlayerRoleChanged.AddDynamic(this, &APlayerCharacter::BindToPartnerPlayerState);
 
-		// 적용 시도
-		TryApplyCustomization();
+		// [추가할 곳] 내 커마 데이터가 리플리케이트 되어 도착했을 때 다시 적용 시도
+		MyPS->OnCustomizationDataChanged.RemoveDynamic(this, &APlayerCharacter::TryApplyCustomization);
+		MyPS->OnCustomizationDataChanged.AddDynamic(this, &APlayerCharacter::TryApplyCustomization);
 
 		// 파트너가 이미 지정되어 있다면 바인딩 시도
 		if (MyPS->ConnectedPlayerIndex != -1)
 		{
 			BindToPartnerPlayerState(MyPS->bIsLowerBody);
 		}
+
+		// 데이터가 다 도착했는지 최초 1회 확인
+		TryApplyCustomization();
 	}
 
 	UpdateHPUI();
@@ -441,11 +464,14 @@ ABRPlayerState* APlayerCharacter::GetUpperBodyPlayerState() const
 	// 1. 내가 상체면 -> 나 자신 리턴
 	if (!MyPS->bIsLowerBody) return MyPS;
 
-	// 2. [핵심] 내가 하체면 -> PartnerPlayerState 포인터 확인 (가장 확실함)
+	// 2. 내가 하체면 -> 확실하게 리플리케이트된 PartnerPlayerState만 신뢰합니다.
 	if (MyPS->PartnerPlayerState)
 	{
 		return MyPS->PartnerPlayerState;
 	}
+
+	// 3. 서버와 클라이언트 간 인덱스 순서가 보장되지 않는 PlayerArray 참조를 제거했습니다.
+	// 파트너 포인터가 아직 없다면 안전하게 nullptr을 반환하여 리플리케이션을 대기합니다.
 	return nullptr;
 }
 
@@ -458,25 +484,26 @@ ABRPlayerState* APlayerCharacter::GetLowerBodyPlayerState() const
 	// 1. 내가 하체면 -> 나 자신 리턴
 	if (MyPS->bIsLowerBody) return MyPS;
 
-	// 2. [핵심] 내가 상체면 -> PartnerPlayerState 포인터 확인
+	// 2. 내가 상체면 -> 확실하게 리플리케이트된 PartnerPlayerState만 신뢰합니다.
 	if (MyPS->PartnerPlayerState)
 	{
 		return MyPS->PartnerPlayerState;
 	}
 
+	// 3. 위험했던 PlayerArray 직접 인덱싱 제거
 	return nullptr;
 }
 
 void APlayerCharacter::TryApplyCustomization()
 {
 	// [핵심 1] 이미 최초 외형 세팅이 끝나서 잠겼다면, SwitchOrb 스왑 등으로 불려도 무시합니다.
-	if (bAppearanceLocked) return;
+	if (bAppearanceLocked)
+	{
+		return;
+	}
 
 	ABRPlayerState* MyPS = Cast<ABRPlayerState>(GetPlayerState());
-	if (!MyPS) return;
-
-	// [역할 동기화 과도기 방지 가드]
-	if (MyPS->PartnerPlayerState && (MyPS->bIsLowerBody == MyPS->PartnerPlayerState->bIsLowerBody))
+	if (!MyPS)
 	{
 		return;
 	}
@@ -484,37 +511,46 @@ void APlayerCharacter::TryApplyCustomization()
 	ABRPlayerState* UpperPS = GetUpperBodyPlayerState();
 	ABRPlayerState* LowerPS = GetLowerBodyPlayerState();
 
-	// --- 상체 적용 ---
-	if (UpperPS && !UpperPS->bIsLowerBody)
+	// [핵심 2] 파트너가 아직 할당되지 않았거나, 상하체 역할이 아직 겹쳐있다면(동기화 중) 대기합니다.
+	if (!UpperPS || !LowerPS || (UpperPS->bIsLowerBody == LowerPS->bIsLowerBody))
 	{
-		int32 ApplyHeadID = UpperPS->CustomizationData.bIsDataValid ? UpperPS->CustomizationData.HeadID : 0;
-		int32 ApplyChestID = UpperPS->CustomizationData.bIsDataValid ? UpperPS->CustomizationData.ChestID : 0;
-		int32 ApplyHandID = UpperPS->CustomizationData.bIsDataValid ? UpperPS->CustomizationData.HandID : 0;
-
-		ApplyMeshFromID(EArmorSlot::Head, ApplyHeadID);
-		ApplyMeshFromID(EArmorSlot::Chest, ApplyChestID);
-		ApplyMeshFromID(EArmorSlot::Hands, ApplyHandID);
+		LOG_PLAYER(Warning, TEXT("TryApplyCustomization: 상/하체 파트너 정보 또는 역할 동기화 대기 중..."));
+		return;
 	}
+
+	// [핵심 3] 양쪽의 커스터마이징 데이터가 모두 도착(Valid)했는지 엄격하게 검증합니다.
+	// 데이터가 아직 오지 않았다면 락을 걸지 않고 빠져나가 다음에 다시 시도할 수 있게 합니다.
+	if (!UpperPS->CustomizationData.bIsDataValid || !LowerPS->CustomizationData.bIsDataValid)
+	{
+		LOG_PLAYER(Warning, TEXT("TryApplyCustomization: 양쪽 커스터마이징 데이터 리플리케이션 대기 중..."));
+		return;
+	}
+
+	// --- 상체 적용 ---
+	int32 ApplyHeadID = UpperPS->CustomizationData.HeadID;
+	int32 ApplyChestID = UpperPS->CustomizationData.ChestID;
+	int32 ApplyHandID = UpperPS->CustomizationData.HandID;
+
+	ApplyMeshFromID(EArmorSlot::Head, ApplyHeadID);
+	ApplyMeshFromID(EArmorSlot::Chest, ApplyChestID);
+	ApplyMeshFromID(EArmorSlot::Hands, ApplyHandID);
+
+	LOG_PLAYER(Log, TEXT("상체 커스터마이징 적용 완료"));
 
 	// --- 하체 적용 ---
-	if (LowerPS && LowerPS->bIsLowerBody)
-	{
-		int32 ApplyLegID = LowerPS->CustomizationData.bIsDataValid ? LowerPS->CustomizationData.LegID : 0;
-		int32 ApplyFootID = LowerPS->CustomizationData.bIsDataValid ? LowerPS->CustomizationData.FootID : 0;
+	int32 ApplyLegID = LowerPS->CustomizationData.LegID;
+	int32 ApplyFootID = LowerPS->CustomizationData.FootID;
 
-		ApplyMeshFromID(EArmorSlot::Legs, ApplyLegID);
-		ApplyMeshFromID(EArmorSlot::Feet, ApplyFootID);
-	}
+	ApplyMeshFromID(EArmorSlot::Legs, ApplyLegID);
+	ApplyMeshFromID(EArmorSlot::Feet, ApplyFootID);
+
+	LOG_PLAYER(Log, TEXT("하체 커스터마이징 적용 완료"));
 
 	// =================================================================
-	// [핵심 2] 두 플레이어의 상/하체 역할이 정상적으로 나뉘어 배정되었다면,
-	// 커마 적용이 완전하게 끝났다고 판단하고 영구 잠금(Lock)을 겁니다.
+	// [핵심 4] 양쪽 역할이 확실히 나뉘었고, 데이터도 모두 유효하게 적용되었으므로 영구 잠금
 	// =================================================================
-	if (MyPS && MyPS->PartnerPlayerState && (MyPS->bIsLowerBody != MyPS->PartnerPlayerState->bIsLowerBody))
-	{
-		bAppearanceLocked = true;
-		LOG_PLAYER(Display, TEXT("Initial Appearance Fully Locked. It won't change on SwitchOrb Swaps."));
-	}
+	bAppearanceLocked = true;
+	LOG_PLAYER(Display, TEXT("Initial Appearance Fully Locked. It won't change on SwitchOrb Swaps."));
 }
 
 void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
@@ -562,6 +598,7 @@ void APlayerCharacter::BindToPartnerPlayerState(bool bIsLowerBody)
 	// 파트너가 갱신되었으므로 커스터마이징 갱신을 찔러줍니다.
 	// (최초 1회는 정상 적용 후 bAppearanceLocked가 true가 되며, 이후 스왑 시에는 무시되어 외형이 고정됩니다.)
 	TryApplyCustomization();
+
 }
 
 void APlayerCharacter::ApplyMeshFromID(EArmorSlot Slot, int32 MeshID)

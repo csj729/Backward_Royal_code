@@ -298,3 +298,11 @@ void ABaseWeapon::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifet
     // CurrentWeaponData 안의 모든 정보(스윙 사운드, 히트 사운드 등)를 참가자에게 동기화!
     DOREPLIFETIME(ABaseWeapon, CurrentWeaponData);
 }
+
+void ABaseWeapon::OnRep_CurrentWeaponData()
+{
+    // 서버로부터 최신 무기 데이터가 도착했을 때 클라이언트에서도 메시와 스탯을 초기화해 줍니다.
+    InitializeWeaponStats(CurrentWeaponData);
+
+    LOG_WEAPON(Log, "OnRep_CurrentWeaponData Called - Client synced weapon data for [%s]", *WeaponRowName.ToString());
+}
